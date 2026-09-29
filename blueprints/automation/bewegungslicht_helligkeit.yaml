@@ -7,6 +7,10 @@ blueprint:
     eingestellte Nachlaufzeit keine Bewegung mehr erkannt worden, wird dieser
     Zustand wiederhergestellt (vorher aus → wieder aus, vorher gedimmt → wieder
     auf die alte Helligkeit/Farbe).
+    Optional wird die Wiederherstellung abgebrochen, wenn das Licht in der
+    Zwischenzeit von Hand geschaltet oder verändert wird, und nach einem
+    Neustart von Home Assistant werden noch eingeschaltete Lichter nach der
+    Nachlaufzeit ausgeschaltet.
   domain: automation
   homeassistant:
     min_version: "2024.10.0"
@@ -108,6 +112,28 @@ blueprint:
           step: 0.5
           unit_of_measurement: s
           mode: slider
+    manual_override:
+      name: Manuelle Änderung respektieren
+      description: >
+        Wird ein Licht während der Nachlaufzeit von Hand geschaltet oder über die
+        App/das Dashboard verändert, bleibt es so, wie es eingestellt wurde, und
+        der vorherige Zustand wird nicht wiederhergestellt. Erkannt werden
+        Änderungen über Home Assistant (App, Dashboard, Sprachassistent) sowie
+        Ein-/Ausschalten am Schalter. Reines Dimmen direkt am Gerät erkennt
+        Home Assistant meist nicht als manuelle Änderung.
+      default: true
+      selector:
+        boolean: {}
+    off_after_restart:
+      name: Nach Neustart ausschalten
+      description: >
+        Der gesicherte Zustand geht bei einem Neustart von Home Assistant
+        verloren. Ist diese Option aktiv, werden nach dem Start eingeschaltete
+        Lichter nach der Nachlaufzeit ohne Bewegung ausgeschaltet. Achtung: Das
+        betrifft auch Lichter, die vor dem Neustart von Hand eingeschaltet wurden.
+      default: true
+      selector:
+        boolean: {}
 
 # single: Während das Licht an ist, werden neue Bewegungsauslöser ignoriert.
 # Die Nachlaufzeit beginnt trotzdem bei jeder neuen Bewegung von vorn (siehe repeat unten),
@@ -120,20 +146,39 @@ triggers:
     entity_id: !input motion_sensor
     from: "off"
     to: "on"
+    id: motion
+  - trigger: homeassistant
+    event: start
+    id: restart
 
 conditions:
-  - condition: numeric_state
-    entity_id: !input lux_sensor
-    below: !input lux_threshold
+  - condition: or
+    conditions:
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: restart
+          - condition: template
+            value_template: "{{ off_after_restart }}"
+      - condition: and
+        conditions:
+          - condition: trigger
+            id: motion
+          - condition: numeric_state
+            entity_id: !input lux_sensor
+            below: !input lux_threshold
 
 variables:
   motion_sensor: !input motion_sensor
+  lights: !input lights
   color_mode: !input color_mode
   brightness_pct: !input brightness_pct
   color_temp_kelvin: !input color_temp_kelvin
   rgb_color: !input rgb_color
   transition: !input transition
   no_motion_wait: !input no_motion_wait
+  manual_override: !input manual_override
+  off_after_restart: !input off_after_restart
   scene_id: "bewegungslicht_{{ this.entity_id.split('.')[1] }}"
   # Daten für light.turn_on je nach Farbmodus zusammenstellen
   light_data: >
@@ -147,37 +192,90 @@ variables:
     {% endif %}
 
 actions:
-  # Ausgangszustand der Lichter sichern
-  - action: scene.create
-    data:
-      scene_id: "{{ scene_id }}"
-      snapshot_entities: !input lights
+  - if:
+      - condition: trigger
+        id: motion
+    then:
+      # Ausgangszustand der Lichter sichern
+      - action: scene.create
+        data:
+          scene_id: "{{ scene_id }}"
+          snapshot_entities: !input lights
 
-  # Licht einschalten bzw. hochdimmen, je nach Farbmodus mit Farbe
-  - action: light.turn_on
-    target:
-      entity_id: !input lights
-    data: "{{ light_data }}"
+      # Licht einschalten bzw. hochdimmen, je nach Farbmodus mit Farbe
+      - action: light.turn_on
+        target:
+          entity_id: !input lights
+        data: "{{ light_data }}"
+    else:
+      # Nach dem Start: warten, bis die Lichter wieder erreichbar sind,
+      # und nur weitermachen, wenn mindestens eines an ist
+      - wait_template: >
+          {{ lights | select('is_state', ['unavailable', 'unknown']) | list | count == 0 }}
+        timeout:
+          seconds: 120
+        continue_on_timeout: true
+      - if:
+          - condition: template
+            value_template: "{{ lights | select('is_state', 'on') | list | count == 0 }}"
+        then:
+          - stop: Nach dem Neustart ist kein Licht an.
 
   # Warten, bis der Sensor die Nachlaufzeit lang durchgehend "keine Bewegung" meldet.
   # Kommt zwischendurch neue Bewegung, beginnt die Frist von vorn.
-  # Anders als ein wait_for_trigger auf "off" funktioniert das auch, wenn der Sensor
-  # bereits vor Beginn des Wartens wieder auf "off" gefallen ist.
+  # Das funktioniert auch, wenn der Sensor schon vor Beginn des Wartens auf "off" stand.
+  # Die Lichter werden dabei beobachtet, um manuelle Änderungen zu erkennen.
   - repeat:
       sequence:
-        - wait_template: "{{ not is_state(motion_sensor, 'on') }}"
         - wait_for_trigger:
             - trigger: state
               entity_id: !input motion_sensor
-              to: "on"
+              to: ~
+              id: motion
+            - trigger: state
+              entity_id: !input lights
+              id: light
+          # Restzeit ab der letzten Änderung des Bewegungssensors, damit Meldungen der
+          # Lichter die Frist nicht verlängern. Bei Bewegung ohne Frist (24 h als Obergrenze).
           timeout:
-            seconds: "{{ no_motion_wait }}"
+            seconds: >
+              {% if is_state(motion_sensor, 'on') %}86400
+              {% else %}{{ [1, no_motion_wait - (now() - states[motion_sensor].last_changed).total_seconds()] | max }}
+              {% endif %}
           continue_on_timeout: true
-      until: "{{ wait.trigger is none and not is_state(motion_sensor, 'on') }}"
 
-  # Vorherigen Zustand wiederherstellen
-  - action: scene.turn_on
-    target:
-      entity_id: "scene.{{ scene_id }}"
-    data:
-      transition: "{{ transition }}"
+        # Manuelle Änderung: alles, was nicht von dieser Automation kommt und entweder
+        # über Home Assistant von einer Person ausgelöst wurde oder das Licht ein-/ausschaltet
+        - if:
+            - condition: template
+              value_template: >
+                {% set t = wait.trigger %}
+                {{ manual_override and t is not none and t.id == 'light'
+                   and t.from_state is not none and t.to_state is not none
+                   and t.to_state.context.id != context.id
+                   and (t.to_state.context.user_id is not none
+                        or (t.from_state.state in ['on', 'off']
+                            and t.to_state.state in ['on', 'off']
+                            and t.from_state.state != t.to_state.state)) }}
+          then:
+            - stop: Licht wurde manuell geändert, Zustand bleibt erhalten.
+      until: >
+        {{ not is_state(motion_sensor, 'on')
+           and (now() - states[motion_sensor].last_changed).total_seconds() >= no_motion_wait }}
+
+  # Vorherigen Zustand wiederherstellen bzw. nach Neustart ausschalten
+  - if:
+      - condition: trigger
+        id: motion
+    then:
+      - action: scene.turn_on
+        target:
+          entity_id: "scene.{{ scene_id }}"
+        data:
+          transition: "{{ transition }}"
+    else:
+      - action: light.turn_off
+        target:
+          entity_id: !input lights
+        data:
+          transition: "{{ transition }}"
