@@ -1,0 +1,118 @@
+blueprint:
+  name: Wärmepumpe – Arbeitszahl aus Energiemengen
+  description: >-
+    Berechnet die Arbeitszahl einer Wärmepumpe aus zwei Energiezählern:
+    abgegebene Wärme geteilt durch aufgenommenen Strom.
+
+
+    **Formel:** `Arbeitszahl = Wärmemenge / Stromverbrauch`
+
+
+    Anders als der Momentan-COP ist das die vergleichbare Kennzahl. Je
+    nachdem, welche Zähler du hineingibst, ergibt sich daraus die Tages-,
+    Monats- oder Jahresarbeitszahl – lege den Blueprint einfach mehrfach an.
+    Beide Zähler müssen denselben Zeitraum abdecken, sonst vergleicht das
+    Ergebnis zwei verschiedene Zeitspannen.
+
+
+    Die Einheiten werden automatisch erkannt (Wh, kWh oder MWh), die beiden
+    Zähler dürfen sich also unterscheiden.
+
+
+    Solange der Stromzähler unter der Mindestmenge liegt, liefert der Sensor
+    `unavailable` – kurz nach Zyklusbeginn stehen beide Zähler nahe null und
+    der Quotient wäre reines Rauschen.
+  domain: template
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+    heat_energy:
+      name: Wärmemenge
+      description: >-
+        Zähler der abgegebenen Wärme im gewünschten Zeitraum. Meist ein
+        utility_meter über einem Riemann-Integral der Wärmeleistung.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: energy
+
+    electrical_energy:
+      name: Stromverbrauch
+      description: >-
+        Zähler des aufgenommenen Stroms über denselben Zeitraum. Muss alles
+        enthalten, was zur Wärmeerzeugung beiträgt – also auch einen
+        elektrischen Zusatzheizer, falls vorhanden.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: energy
+
+    min_energy:
+      name: Mindest-Stromverbrauch
+      description: >-
+        Erst ab dieser Menge im Nenner wird gerechnet. Richtwert: 0,5 kWh für
+        Tages-, 5 kWh für Monats- und 50 kWh für Jahreszähler.
+      default: 0.5
+      selector:
+        number:
+          min: 0.1
+          max: 1000
+          step: 0.1
+          unit_of_measurement: kWh
+          mode: box
+
+    max_value:
+      name: Obere Plausibilitätsgrenze
+      description: >-
+        Werte darüber werden verworfen. Eine Arbeitszahl jenseits von 8 deutet
+        auf einen Zählerreset oder eine falsch zugeordnete Quelle hin, nicht
+        auf eine besonders gute Anlage.
+      default: 8
+      selector:
+        number:
+          min: 2
+          max: 25
+          step: 0.5
+          mode: box
+
+variables:
+  heat_energy: !input heat_energy
+  electrical_energy: !input electrical_energy
+  min_energy: !input min_energy
+  max_value: !input max_value
+
+sensor:
+  state_class: measurement
+  icon: mdi:sigma
+
+  availability: >-
+    {% set f = {'mwh': 1000, 'kwh': 1, 'wh': 0.001} %}
+    {% set u_q = (state_attr(heat_energy, 'unit_of_measurement') or 'kWh') | lower %}
+    {% set u_e = (state_attr(electrical_energy, 'unit_of_measurement') or 'kWh') | lower %}
+    {% set q = states(heat_energy) | float(0) * f.get(u_q, 1) %}
+    {% set e = states(electrical_energy) | float(0) * f.get(u_e, 1) %}
+    {{ has_value(heat_energy)
+       and has_value(electrical_energy)
+       and e >= min_energy
+       and (q / e) <= max_value }}
+
+  state: >-
+    {% set f = {'mwh': 1000, 'kwh': 1, 'wh': 0.001} %}
+    {% set u_q = (state_attr(heat_energy, 'unit_of_measurement') or 'kWh') | lower %}
+    {% set u_e = (state_attr(electrical_energy, 'unit_of_measurement') or 'kWh') | lower %}
+    {% set q = states(heat_energy) | float(0) * f.get(u_q, 1) %}
+    {% set e = states(electrical_energy) | float(0) * f.get(u_e, 1) %}
+    {{ (q / e) | round(2) if e > 0 else 0 }}
+
+  attributes:
+    waermemenge_kwh: >-
+      {% set f = {'mwh': 1000, 'kwh': 1, 'wh': 0.001} %}
+      {% set u = (state_attr(heat_energy, 'unit_of_measurement') or 'kWh') | lower %}
+      {{ (states(heat_energy) | float(0) * f.get(u, 1)) | round(2) }}
+    strom_kwh: >-
+      {% set f = {'mwh': 1000, 'kwh': 1, 'wh': 0.001} %}
+      {% set u = (state_attr(electrical_energy, 'unit_of_measurement') or 'kWh') | lower %}
+      {{ (states(electrical_energy) | float(0) * f.get(u, 1)) | round(2) }}

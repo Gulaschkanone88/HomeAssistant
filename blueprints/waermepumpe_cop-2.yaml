@@ -1,0 +1,155 @@
+blueprint:
+  name: Wärmepumpe – COP (Momentanwert)
+  description: >-
+    Berechnet die momentane Leistungszahl (COP) einer Wärmepumpe aus der
+    abgegebenen Wärmeleistung und der aufgenommenen elektrischen Leistung.
+
+
+    **Formel:** `COP = Wärmeleistung / elektrische Leistung`
+
+
+    Die Einheiten beider Quellen werden automatisch erkannt (W, kW oder MW)
+    und intern auf Watt umgerechnet – die Sensoren dürfen also
+    unterschiedliche Einheiten haben.
+
+
+    Außerhalb der eingestellten Gültigkeitsgrenzen liefert der Sensor
+    bewusst `unavailable` statt eines Zahlenwerts. Eine 0 während Standby
+    oder Abtauung würde jeden Tages- und Monatsmittelwert verfälschen.
+
+
+    **Wichtig:** Misst der Stromzähler einen elektrischen Zusatzheizer nicht
+    mit, obwohl dessen Wärme im Wärmeleistungssensor enthalten ist, fällt der
+    COP in diesen Phasen zu gut aus. Hänge den Zusatzheizer dann unter
+    "Sperrende Entitäten" ein.
+  domain: template
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+    thermal_power:
+      name: Wärmeleistung
+      description: >-
+        Sensor der abgegebenen thermischen Leistung. Liefert die Anlage ihn
+        nicht selbst, lässt er sich aus Volumenstrom und Spreizung bilden:
+        P = Volumenstrom [l/h] × Spreizung [K] × 1,163 / 1000 [kW].
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+
+    electrical_power:
+      name: Elektrische Leistung
+      description: >-
+        Sensor der aufgenommenen elektrischen Leistung der Wärmepumpe.
+        Sollte Verdichter, Umwälzpumpe und Steuerung umfassen.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+
+    min_electrical_power:
+      name: Mindest-Elektroleistung
+      description: >-
+        Unterhalb dieses Werts wird nicht gerechnet. Die Anlage zieht auch im
+        Stillstand Strom für Steuerung und Pumpe; ohne Untergrenze würde der
+        Quotient beliebig groß. Etwa das Dreifache der gemessenen
+        Standby-Leistung ist ein guter Startwert.
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 5000
+          step: 10
+          unit_of_measurement: W
+          mode: box
+
+    min_thermal_power:
+      name: Mindest-Wärmeleistung
+      description: >-
+        Unterhalb dieses Werts wird nicht gerechnet. Verhindert, dass
+        Abtauzyklen und der Nachlauf der Umwälzpumpe als schlechter COP in
+        die Statistik gehen.
+      default: 300
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 10
+          unit_of_measurement: W
+          mode: box
+
+    max_cop:
+      name: Obere Plausibilitätsgrenze
+      description: >-
+        Werte darüber werden verworfen. Beim Anlagenstart hinkt der
+        Durchflusssensor dem tatsächlichen Volumenstrom hinterher, was
+        kurzzeitig unrealistisch hohe Werte erzeugt.
+      default: 8
+      selector:
+        number:
+          min: 2
+          max: 25
+          step: 0.5
+          mode: box
+
+    blocking_entities:
+      name: Sperrende Entitäten
+      description: >-
+        Solange eine dieser Entitäten `on` ist, liefert der Sensor keinen
+        Wert. Gedacht für einen elektrischen Zusatzheizer, dessen Strom nicht
+        im Zähler steckt, oder für den Kühlbetrieb. Leer lassen, wenn nichts
+        zutrifft.
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+variables:
+  thermal_power: !input thermal_power
+  electrical_power: !input electrical_power
+  min_electrical_power: !input min_electrical_power
+  min_thermal_power: !input min_thermal_power
+  max_cop: !input max_cop
+  blocking_entities: !input blocking_entities
+
+sensor:
+  state_class: measurement
+  icon: mdi:heat-pump
+
+  availability: >-
+    {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+    {% set u_th = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set u_el = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set p_th = states(thermal_power) | float(0) * f.get(u_th, 1) %}
+    {% set p_el = states(electrical_power) | float(0) * f.get(u_el, 1) %}
+    {% set blocked = expand(blocking_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+    {{ has_value(thermal_power)
+       and has_value(electrical_power)
+       and not blocked
+       and p_el >= min_electrical_power
+       and p_th >= min_thermal_power
+       and (p_th / p_el) <= max_cop }}
+
+  state: >-
+    {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+    {% set u_th = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set u_el = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set p_th = states(thermal_power) | float(0) * f.get(u_th, 1) %}
+    {% set p_el = states(electrical_power) | float(0) * f.get(u_el, 1) %}
+    {{ (p_th / p_el) | round(2) if p_el > 0 else 0 }}
+
+  attributes:
+    waermeleistung_w: >-
+      {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+      {% set u = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+      {{ (states(thermal_power) | float(0) * f.get(u, 1)) | round(0) }}
+    elektrische_leistung_w: >-
+      {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+      {% set u = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+      {{ (states(electrical_power) | float(0) * f.get(u, 1)) | round(0) }}
+    gesperrt_durch: >-
+      {{ expand(blocking_entities) | selectattr('state', 'eq', 'on')
+         | map(attribute='entity_id') | list | join(', ') }}
