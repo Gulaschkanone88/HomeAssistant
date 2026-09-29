@@ -35,10 +35,17 @@ Wärmeleistung.
 
 ## Installation
 
-Die Dateien nach `config/blueprints/template/` legen und in
-der `configuration.yaml` per `use_blueprint` einbinden – ein Beispiel steht in
-`configuration_beispiel.yaml`. Eine Oberfläche zum Anlegen gibt es für
-Template-Blueprints nicht, die Einbindung läuft über YAML.
+Die beiden Blueprints `waermepumpe_cop.yaml` und `waermepumpe_arbeitszahl.yaml`
+nach `config/blueprints/template/` legen und in der `configuration.yaml` per
+`use_blueprint` einbinden – ein Beispiel steht in
+`waermepumpe_beispiel_configuration.yaml`. Diese Beispieldatei ist kein
+Blueprint und gehört nicht mit in den Blueprint-Ordner. Eine Oberfläche zum
+Anlegen gibt es für Template-Blueprints nicht, die Einbindung läuft über YAML.
+
+Die Namen in der Beispielkonfiguration sind bewusst ohne Umlaute geschrieben.
+Home Assistant bildet die Entity-ID aus dem Namen und macht dabei aus „ä“ ein
+„a“, aus „WP Wärmemenge“ würde also `sensor.wp_warmemenge`. Die Verweise
+zwischen den Sensoren passen dann nicht mehr.
 
 Jeder Blueprint erzeugt genau eine Entität. Mehrere Entitäten entstehen,
 indem derselbe Blueprint mehrfach eingebunden wird – für Tages-, Monats- und
