@@ -110,7 +110,7 @@ blueprint:
           mode: slider
 
 # single: Während das Licht an ist, werden neue Bewegungsauslöser ignoriert.
-# Der Nachlauf-Timer startet trotzdem bei jeder neuen Bewegung neu (siehe wait_for_trigger),
+# Die Nachlaufzeit beginnt trotzdem bei jeder neuen Bewegung von vorn (siehe repeat unten),
 # und die Sicherung des Ausgangszustands wird nicht durch den "hellen" Zustand überschrieben.
 mode: single
 max_exceeded: silent
@@ -127,12 +127,26 @@ conditions:
     below: !input lux_threshold
 
 variables:
+  motion_sensor: !input motion_sensor
   color_mode: !input color_mode
+  brightness_pct: !input brightness_pct
+  color_temp_kelvin: !input color_temp_kelvin
+  rgb_color: !input rgb_color
+  transition: !input transition
+  no_motion_wait: !input no_motion_wait
+  scene_id: "bewegungslicht_{{ this.entity_id.split('.')[1] }}"
+  # Daten für light.turn_on je nach Farbmodus zusammenstellen
+  light_data: >
+    {% set d = {'brightness_pct': brightness_pct, 'transition': transition} %}
+    {% if color_mode == 'temp' %}
+      {{ dict(d, color_temp_kelvin=color_temp_kelvin) }}
+    {% elif color_mode == 'rgb' %}
+      {{ dict(d, rgb_color=rgb_color) }}
+    {% else %}
+      {{ d }}
+    {% endif %}
 
 actions:
-  - variables:
-      scene_id: "bewegungslicht_{{ this.entity_id | replace('automation.', '') }}"
-
   # Ausgangszustand der Lichter sichern
   - action: scene.create
     data:
@@ -140,45 +154,30 @@ actions:
       snapshot_entities: !input lights
 
   # Licht einschalten bzw. hochdimmen, je nach Farbmodus mit Farbe
-  - choose:
-      - conditions: "{{ color_mode == 'temp' }}"
-        sequence:
-          - action: light.turn_on
-            target:
-              entity_id: !input lights
-            data:
-              brightness_pct: !input brightness_pct
-              color_temp_kelvin: !input color_temp_kelvin
-              transition: !input transition
-      - conditions: "{{ color_mode == 'rgb' }}"
-        sequence:
-          - action: light.turn_on
-            target:
-              entity_id: !input lights
-            data:
-              brightness_pct: !input brightness_pct
-              rgb_color: !input rgb_color
-              transition: !input transition
-    default:
-      - action: light.turn_on
-        target:
-          entity_id: !input lights
-        data:
-          brightness_pct: !input brightness_pct
-          transition: !input transition
+  - action: light.turn_on
+    target:
+      entity_id: !input lights
+    data: "{{ light_data }}"
 
   # Warten, bis der Sensor die Nachlaufzeit lang durchgehend "keine Bewegung" meldet.
   # Kommt zwischendurch neue Bewegung, beginnt die Frist von vorn.
-  - wait_for_trigger:
-      - trigger: state
-        entity_id: !input motion_sensor
-        to: "off"
-        for:
-          seconds: !input no_motion_wait
+  # Anders als ein wait_for_trigger auf "off" funktioniert das auch, wenn der Sensor
+  # bereits vor Beginn des Wartens wieder auf "off" gefallen ist.
+  - repeat:
+      sequence:
+        - wait_template: "{{ not is_state(motion_sensor, 'on') }}"
+        - wait_for_trigger:
+            - trigger: state
+              entity_id: !input motion_sensor
+              to: "on"
+          timeout:
+            seconds: "{{ no_motion_wait }}"
+          continue_on_timeout: true
+      until: "{{ wait.trigger is none and not is_state(motion_sensor, 'on') }}"
 
   # Vorherigen Zustand wiederherstellen
   - action: scene.turn_on
     target:
       entity_id: "scene.{{ scene_id }}"
     data:
-      transition: !input transition
+      transition: "{{ transition }}"
