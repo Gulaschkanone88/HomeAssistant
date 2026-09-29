@@ -1,330 +1,155 @@
-# =============================================================================
-# COP / Arbeitszahl der Daikin-Rotex-HPSU in Home Assistant
-# Stand 18.09.2026 -- Fassung 3, ohne Heizstab
-#
-# Physikalische Grundlage
-#   COP = abgegebene Waermeleistung / aufgenommene elektrische Leistung
-#   P_th [kW] = Volumenstrom [l/h] x Spreizung [K] x 1,163 [Wh/(l*K)] / 1000
-#
-#   Gegenprobe mit Live-Werten: 765 l/h x 0,25 K x 1,163 = 222,4 W, waehrend
-#   sensor.hpsu_can_thermische_leistung -0,23 kW meldete. Die HPSU rechnet
-#   bereits exakt nach dieser Formel -- ein eigener Waermeleistungssensor
-#   ist nicht noetig.
-#
-# Der elektrische Heizstab ist nicht angeschlossen. Damit ist der Zaehler
-# sensor.hwr_warmepumpe_electric_consumption_* der vollstaendige Nenner und
-# die Rechnung bleibt einfach: alles, was Waerme erzeugt, haengt an diesem
-# Zaehler. Bestaetigt wird das durch die Anlagendaten selbst --
-# select.hpsu_can_funktion_ehs steht auf "Kein zusaetzlicher Waermeerzeuger",
-# und die Zaehler sensor.hpsu_can_ehs_fuer_ch (2215 kWh) und
-# sensor.hpsu_can_ehs_f_r_dhw (3092 kWh) standen ueber acht Tage unveraendert.
-#
-#   ACHTUNG: Diese beiden EHS-Zaehler sind Altbestaende aus der Zeit, als der
-#   Heizstab noch angeschlossen war. Sie duerfen NICHT in den Nenner -- sonst
-#   waere er um 5307 kWh zu hoch und jede Arbeitszahl waere wertlos. Falls du
-#   den Heizstab spaeter wieder anklemmst, steht der passende Block weiter
-#   unten auskommentiert bereit.
-#
-# Weitere Befunde aus der 8-Tage-Historie (31.08. bis 08.09.2026)
-#   Grobe Arbeitszahl im Zeitraum: erzeugte Waerme +58 kWh, Strom +25,6 kWh,
-#     also rund 2,3. Fuer reinen Warmwasserbetrieb im September mit
-#     Standby-Anteil plausibel.
-#   sensor.hwr_warmepumpe_electric_consumption_w hatte einen Ausreisser von
-#     -214748340,5 W. Das ist -2^31/10, ein Zaehlerueberlauf des Z-Wave-Moduls.
-#     Er wird unten abgefangen -- unbehandelt zerstoert so ein Wert jeden
-#     Mittelwert und jede Integration.
-#   sensor.hpsu_can_elektrische_energie_gesamt steht unveraendert auf exakt
-#     32768 kWh = 2^15. Ebenfalls ein Ueberlauf, als Zaehlerbasis unbrauchbar.
-#
-# Hinweis: sensor.ug_wp_cop (unknown) und sensor.ug_wp_cop_daily (-1)
-# existieren bereits und liefern keine Werte. Vor dem Einspielen suchen,
-# wo sie definiert sind, und sie ersetzen statt zu doppeln.
-# =============================================================================
+blueprint:
+  name: Wärmepumpe – COP (Momentanwert)
+  description: >-
+    Berechnet die momentane Leistungszahl (COP) einer Wärmepumpe aus der
+    abgegebenen Wärmeleistung und der aufgenommenen elektrischen Leistung.
 
 
-template:
-  - sensor:
+    **Formel:** `COP = Wärmeleistung / elektrische Leistung`
 
-# -----------------------------------------------------------------------------
-# 1) Bereinigte elektrische Leistung
-#    Faengt den Zaehlerueberlauf ab. Obergrenze grosszuegig auf 12 kW gesetzt;
-#    ohne Heizstab duerfte deine Anlage nie ueber etwa 3 kW kommen -- du kannst
-#    die Grenze also deutlich enger ziehen, etwa auf 5000, dann faellt ein
-#    defekter Messwert frueher auf.
-# -----------------------------------------------------------------------------
-      - name: "WP Elektrische Leistung bereinigt"
-        unique_id: wp_p_el_bereinigt
-        unit_of_measurement: "W"
-        device_class: power
-        state_class: measurement
-        availability: "{{ has_value('sensor.hwr_warmepumpe_electric_consumption_w') }}"
-        state: >
-          {% set p_max = 12000 %}
-          {% set p = states('sensor.hwr_warmepumpe_electric_consumption_w') | float(0) %}
-          {{ p | round(1) if 0 <= p <= p_max else none }}
 
-# -----------------------------------------------------------------------------
-# 2) Nur positive Waermeleistung
-#    Abtauzyklen und Kuehlbetrieb liefern negative Werte. Wuerde man die
-#    mitintegrieren, laeuft der Waermemengenzaehler rueckwaerts.
-# -----------------------------------------------------------------------------
-      - name: "WP Waermeleistung positiv"
-        unique_id: wp_waermeleistung_positiv
-        unit_of_measurement: "kW"
-        device_class: power
-        state_class: measurement
-        availability: "{{ has_value('sensor.hpsu_can_thermische_leistung') }}"
-        state: >
-          {{ [ states('sensor.hpsu_can_thermische_leistung') | float(0), 0 ] | max | round(3) }}
+    Die Einheiten beider Quellen werden automatisch erkannt (W, kW oder MW)
+    und intern auf Watt umgerechnet – die Sensoren dürfen also
+    unterschiedliche Einheiten haben.
 
-# -----------------------------------------------------------------------------
-# 3) Momentaner COP
-#
-#    Einstellbare Parameter:
-#      p_el_min   Mindest-Elektroleistung in W, ab der gerechnet wird. Deine
-#                 Anlage zieht im Leerlauf rund 68 W; darunter waere der
-#                 Quotient beliebig gross. 200 W haelt sicheren Abstand.
-#      p_th_min   Mindest-Waermeleistung in kW, damit Abtauung und Nachlauf
-#                 nicht als schlechter COP in die Statistik gehen.
-#      cop_max    Plausibilitaetsgrenze. Hoehere Werte sind Messrauschen des
-#                 traegen Durchflusssensors beim Anlagenstart.
-#
-#    Ausserhalb der Grenzen wird "unknown" ausgegeben, nicht 0 -- eine Null
-#    wuerde jeden Tages- und Monatsmittelwert nach unten ziehen.
-# -----------------------------------------------------------------------------
-      - name: "WP COP aktuell"
-        unique_id: wp_cop_aktuell
-        state_class: measurement
-        icon: mdi:heat-pump
-        availability: >
-          {{ has_value('sensor.hpsu_can_thermische_leistung')
-             and has_value('sensor.wp_elektrische_leistung_bereinigt') }}
-        state: >
-          {% set p_el_min = 200 %}
-          {% set p_th_min = 0.3 %}
-          {% set cop_max  = 8 %}
-          {% set p_th = states('sensor.hpsu_can_thermische_leistung') | float(0) %}
-          {% set p_el = states('sensor.wp_elektrische_leistung_bereinigt') | float(0) %}
-          {% if p_el >= p_el_min and p_th >= p_th_min %}
-            {% set cop = (p_th * 1000) / p_el %}
-            {{ cop | round(2) if cop <= cop_max else none }}
-          {% else %}
-            {{ none }}
-          {% endif %}
-        attributes:
-          waermeleistung_kw: "{{ states('sensor.hpsu_can_thermische_leistung') | float(0) }}"
-          elektrisch_w: "{{ states('sensor.wp_elektrische_leistung_bereinigt') | float(0) }}"
-          verdichter: "{{ states('binary_sensor.hpsu_can_status_kompressor') }}"
-          betriebsart: "{{ states('sensor.hpsu_can_betriebsart') }}"
 
-# -----------------------------------------------------------------------------
-# 4) Arbeitszahlen -- die eigentlich aussagekraeftigen Werte
-#    Der Momentan-COP schwankt mit jedem Takt. Vergleichbar wird erst das
-#    Verhaeltnis der Energiemengen ueber einen Zeitraum.
-#    Die Mindestwerte im Nenner verhindern unsinnige Quotienten kurz nach
-#    Zyklusbeginn, wenn beide Zaehler noch fast auf null stehen.
-# -----------------------------------------------------------------------------
-      - name: "WP Arbeitszahl heute"
-        unique_id: wp_arbeitszahl_heute
-        state_class: measurement
-        icon: mdi:sigma
-        state: >
-          {% set q = states('sensor.wp_waermemenge_taeglich') | float(0) %}
-          {% set e = states('sensor.wp_strom_taeglich') | float(0) %}
-          {{ (q / e) | round(2) if e > 0.5 else none }}
+    Außerhalb der eingestellten Gültigkeitsgrenzen liefert der Sensor
+    bewusst `unavailable` statt eines Zahlenwerts. Eine 0 während Standby
+    oder Abtauung würde jeden Tages- und Monatsmittelwert verfälschen.
 
-      - name: "WP Arbeitszahl Monat"
-        unique_id: wp_arbeitszahl_monat
-        state_class: measurement
-        icon: mdi:sigma
-        state: >
-          {% set q = states('sensor.wp_waermemenge_monatlich') | float(0) %}
-          {% set e = states('sensor.wp_strom_monatlich') | float(0) %}
-          {{ (q / e) | round(2) if e > 5 else none }}
 
-      - name: "WP Jahresarbeitszahl"
-        unique_id: wp_jahresarbeitszahl
-        state_class: measurement
-        icon: mdi:sigma
-        state: >
-          {% set q = states('sensor.wp_waermemenge_jaehrlich') | float(0) %}
-          {% set e = states('sensor.wp_strom_jaehrlich') | float(0) %}
-          {{ (q / e) | round(2) if e > 50 else none }}
+    **Wichtig:** Misst der Stromzähler einen elektrischen Zusatzheizer nicht
+    mit, obwohl dessen Wärme im Wärmeleistungssensor enthalten ist, fällt der
+    COP in diesen Phasen zu gut aus. Hänge den Zusatzheizer dann unter
+    "Sperrende Entitäten" ein.
+  domain: template
+  homeassistant:
+    min_version: "2024.6.0"
 
-# -----------------------------------------------------------------------------
-# 5) Warnung bei unerwarteter Heizstab-Aktivitaet
-#    Solange der Heizstab abgeklemmt ist, duerfen die EHS-Zaehler nicht
-#    steigen. Tun sie es doch, stimmt eine Annahme nicht mehr -- entweder ist
-#    er wieder angeschlossen oder die Anlage zaehlt angeforderte statt
-#    tatsaechlich abgegebene Energie. In beiden Faellen werden die
-#    Arbeitszahlen ab diesem Moment zu gut und du solltest es wissen.
-#    Referenzwerte unten anpassen, falls du sie einmal zuruecksetzt.
-# -----------------------------------------------------------------------------
-      - name: "WP EHS-Zaehler unveraendert"
-        unique_id: wp_ehs_unveraendert
-        icon: mdi:alert-outline
-        state: >
-          {% set ref_ch = 2215 %}
-          {% set ref_dhw = 3092 %}
-          {% set ch = states('sensor.hpsu_can_ehs_fuer_ch') | float(0) %}
-          {% set dhw = states('sensor.hpsu_can_ehs_f_r_dhw') | float(0) %}
-          {{ 'ok' if (ch <= ref_ch and dhw <= ref_dhw) else 'Heizstab zaehlt' }}
+  input:
+    thermal_power:
+      name: Wärmeleistung
+      description: >-
+        Sensor der abgegebenen thermischen Leistung. Liefert die Anlage ihn
+        nicht selbst, lässt er sich aus Volumenstrom und Spreizung bilden:
+        P = Volumenstrom [l/h] × Spreizung [K] × 1,163 / 1000 [kW].
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
 
+    electrical_power:
+      name: Elektrische Leistung
+      description: >-
+        Sensor der aufgenommenen elektrischen Leistung der Wärmepumpe.
+        Sollte Verdichter, Umwälzpumpe und Steuerung umfassen.
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: power
+
+    min_electrical_power:
+      name: Mindest-Elektroleistung
+      description: >-
+        Unterhalb dieses Werts wird nicht gerechnet. Die Anlage zieht auch im
+        Stillstand Strom für Steuerung und Pumpe; ohne Untergrenze würde der
+        Quotient beliebig groß. Etwa das Dreifache der gemessenen
+        Standby-Leistung ist ein guter Startwert.
+      default: 200
+      selector:
+        number:
+          min: 1
+          max: 5000
+          step: 10
+          unit_of_measurement: W
+          mode: box
+
+    min_thermal_power:
+      name: Mindest-Wärmeleistung
+      description: >-
+        Unterhalb dieses Werts wird nicht gerechnet. Verhindert, dass
+        Abtauzyklen und der Nachlauf der Umwälzpumpe als schlechter COP in
+        die Statistik gehen.
+      default: 300
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 10
+          unit_of_measurement: W
+          mode: box
+
+    max_cop:
+      name: Obere Plausibilitätsgrenze
+      description: >-
+        Werte darüber werden verworfen. Beim Anlagenstart hinkt der
+        Durchflusssensor dem tatsächlichen Volumenstrom hinterher, was
+        kurzzeitig unrealistisch hohe Werte erzeugt.
+      default: 8
+      selector:
+        number:
+          min: 2
+          max: 25
+          step: 0.5
+          mode: box
+
+    blocking_entities:
+      name: Sperrende Entitäten
+      description: >-
+        Solange eine dieser Entitäten `on` ist, liefert der Sensor keinen
+        Wert. Gedacht für einen elektrischen Zusatzheizer, dessen Strom nicht
+        im Zähler steckt, oder für den Kühlbetrieb. Leer lassen, wenn nichts
+        zutrifft.
+      default: []
+      selector:
+        entity:
+          multiple: true
+
+variables:
+  thermal_power: !input thermal_power
+  electrical_power: !input electrical_power
+  min_electrical_power: !input min_electrical_power
+  min_thermal_power: !input min_thermal_power
+  max_cop: !input max_cop
+  blocking_entities: !input blocking_entities
 
 sensor:
+  state_class: measurement
+  icon: mdi:heat-pump
 
-# -----------------------------------------------------------------------------
-# 6) Geglaetteter COP fuer die Anzeige
-#    window_size bestimmt die Traegheit: 15 Minuten glaettet die Takte und
-#    bleibt reaktiv. Fuer eine ruhige Dashboard-Kachel 30 bis 60 Minuten.
-# -----------------------------------------------------------------------------
-  - platform: filter
-    name: "WP COP geglaettet"
-    unique_id: wp_cop_geglaettet
-    entity_id: sensor.wp_cop_aktuell
-    filters:
-      - filter: time_simple_moving_average
-        window_size: "00:15"
-        precision: 2
+  availability: >-
+    {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+    {% set u_th = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set u_el = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set p_th = states(thermal_power) | float(0) * f.get(u_th, 1) %}
+    {% set p_el = states(electrical_power) | float(0) * f.get(u_el, 1) %}
+    {% set blocked = expand(blocking_entities) | selectattr('state', 'eq', 'on') | list | count > 0 %}
+    {{ has_value(thermal_power)
+       and has_value(electrical_power)
+       and not blocked
+       and p_el >= min_electrical_power
+       and p_th >= min_thermal_power
+       and (p_th / p_el) <= max_cop }}
 
-# -----------------------------------------------------------------------------
-# 7) Waermemengenzaehler
-#    Riemann-Integration der positiven Waermeleistung. Quelle ist kW, Zeitbasis
-#    Stunde, Ergebnis kWh -- deshalb KEIN unit_prefix, sonst kommen MWh heraus.
-#    method: left passt zu einem Sensor, der nur bei Wertaenderung aktualisiert.
-#    max_sub_interval integriert auch waehrend langer konstanter Phasen weiter.
-# -----------------------------------------------------------------------------
-  - platform: integration
-    source: sensor.wp_waermeleistung_positiv
-    name: "WP Waermemenge"
-    unique_id: wp_waermemenge
-    unit_time: h
-    method: left
-    max_sub_interval: "00:05:00"
-    round: 3
+  state: >-
+    {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+    {% set u_th = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set u_el = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+    {% set p_th = states(thermal_power) | float(0) * f.get(u_th, 1) %}
+    {% set p_el = states(electrical_power) | float(0) * f.get(u_el, 1) %}
+    {{ (p_th / p_el) | round(2) if p_el > 0 else 0 }}
 
-
-# -----------------------------------------------------------------------------
-# 8) Zaehler je Zeitraum
-#    Waerme und Strom muessen ueber exakt denselben Zyklus laufen, sonst
-#    vergleicht die Arbeitszahl zwei verschiedene Zeitraeume.
-#    Fuer die Heizsaison statt des Kalenderjahres: bei cycle yearly ein
-#    offset setzen oder auf cycle quarterly wechseln.
-# -----------------------------------------------------------------------------
-utility_meter:
-  wp_waermemenge_taeglich:
-    source: sensor.wp_waermemenge
-    name: "WP Waermemenge taeglich"
-    cycle: daily
-  wp_waermemenge_monatlich:
-    source: sensor.wp_waermemenge
-    name: "WP Waermemenge monatlich"
-    cycle: monthly
-  wp_waermemenge_jaehrlich:
-    source: sensor.wp_waermemenge
-    name: "WP Waermemenge jaehrlich"
-    cycle: yearly
-
-  wp_strom_taeglich:
-    source: sensor.hwr_warmepumpe_electric_consumption_kwh
-    name: "WP Strom taeglich"
-    cycle: daily
-  wp_strom_monatlich:
-    source: sensor.hwr_warmepumpe_electric_consumption_kwh
-    name: "WP Strom monatlich"
-    cycle: monthly
-  wp_strom_jaehrlich:
-    source: sensor.hwr_warmepumpe_electric_consumption_kwh
-    name: "WP Strom jaehrlich"
-    cycle: yearly
-
-
-# =============================================================================
-# FALLS DER HEIZSTAB WIEDER ANS NETZ GEHT
-#
-# Dann faellt seine elektrische Leistung nicht in den vorhandenen Zaehler, seine
-# Waerme steckt aber in sensor.hpsu_can_thermische_leistung. Ohne Korrektur
-# waere der COP in jeder Heizstabphase zu gut. Zwei Ergaenzungen genuegen:
-#
-# a) Summenzaehler als neue Quelle fuer die drei Strom-utility_meter.
-#    Ein Heizstab hat einen Wirkungsgrad nahe 1, elektrische und thermische
-#    kWh sind dort praktisch identisch -- die EHS-Werte sind also direkt als
-#    Stromverbrauch verwendbar:
-#
-#   template:
-#     - sensor:
-#         - name: "WP Strom gesamt"
-#           unique_id: wp_strom_gesamt
-#           unit_of_measurement: "kWh"
-#           device_class: energy
-#           state_class: total_increasing
-#           state: >
-#             {{ ( states('sensor.hwr_warmepumpe_electric_consumption_kwh') | float(0)
-#                + states('sensor.hpsu_can_ehs_fuer_ch') | float(0)
-#                + states('sensor.hpsu_can_ehs_f_r_dhw') | float(0) ) | round(1) }}
-#
-#    Danach in den utility_meter-Bloecken source auf sensor.wp_strom_gesamt
-#    umstellen. Die Altbestaende von 5307 kWh sind dabei unkritisch: der
-#    utility_meter zaehlt nur Zuwaechse ab dem Zyklusbeginn, nicht den
-#    absoluten Stand.
-#
-# b) Heizstab-Erkennung, damit der Momentan-COP in diesen Phasen aussetzt --
-#    fuer ihn gibt es keine Momentanleistung des Heizstabs:
-#
-#   template:
-#     - trigger:
-#         - trigger: state
-#           entity_id:
-#             - sensor.hpsu_can_ehs_fuer_ch
-#             - sensor.hpsu_can_ehs_f_r_dhw
-#       binary_sensor:
-#         - name: "WP Heizstab aktiv"
-#           unique_id: wp_heizstab_aktiv
-#           auto_off: "00:30:00"
-#           state: >
-#             {{ trigger.to_state.state | float(-1) > trigger.from_state.state | float(-1) }}
-#
-#    Dann im COP-Template die Bedingung ergaenzen:
-#      {% set heizstab = is_state('binary_sensor.wp_heizstab_aktiv', 'on') %}
-#      {% if not heizstab and p_el >= p_el_min and p_th >= p_th_min %}
-#
-#    Die Zaehler loesen in 1-kWh-Schritten aus; bei Stufe 1 mit 3 kW ist das
-#    etwa alle 20 Minuten, deshalb die 30 Minuten auto_off. Bei 6 kW auf
-#    15 Minuten verkuerzen.
-# =============================================================================
-
-
-# =============================================================================
-# Einbau
-#   Die Bloecke template:, sensor: und utility_meter: gehoeren jeweils genau
-#   einmal in die configuration.yaml. Existieren sie dort schon, nur den Inhalt
-#   unter den bestehenden Schluessel haengen, nicht den Schluessel wiederholen.
-#   Danach Entwicklerwerkzeuge > YAML > Konfiguration pruefen, dann neu starten.
-#
-# Ergebnis
-#   sensor.wp_cop_aktuell             Momentanwert, nur bei echter Waermeabgabe
-#   sensor.wp_cop_geglaettet          15-Minuten-Mittel, fuer Kacheln
-#   sensor.wp_waermemenge             Waermemengenzaehler kWh, laufend
-#   sensor.wp_arbeitszahl_heute       Tagesarbeitszahl
-#   sensor.wp_arbeitszahl_monat       Monatsarbeitszahl
-#   sensor.wp_jahresarbeitszahl       JAZ
-#   sensor.wp_ehs_zaehler_unveraendert  Kontrolle, dass der Heizstab still ist
-#
-# Erwartungswerte: eine Luft-Wasser-Waermepumpe mit Fussbodenheizung erreicht
-# ueblicherweise eine JAZ zwischen 3,0 und 4,5. Ohne Heizstab faellt der
-# uebliche Verzerrungsfaktor weg -- der Wert misst dann tatsaechlich die
-# Waermepumpe und nicht die Mischung aus Waermepumpe und Direktheizung.
-# Deine Heizkurve steht auf 0,27 bei minimaler Vorlauftemperatur 25 Grad,
-# was fuer die Heizung guenstig ist.
-#
-# Genauigkeitsgrenzen
-#   Der Durchflusssensor der HPSU ist der groesste Unsicherheitsfaktor. Bei
-#   Anlagenstart und beim Abtauen laeuft er dem tatsaechlichen Volumenstrom
-#   hinterher; Momentanwerte in diesen Phasen sind unbrauchbar.
-#   Die Konstante 1,163 gilt fuer reines Wasser. Bei Glykolanteil im Kreis
-#   liegt die spezifische Waermekapazitaet niedriger, die HPSU rechnet aber
-#   weiterhin mit Wasser.
-#   Ein geeichter Waermemengenzaehler ist die einzige Moeglichkeit, die
-#   absolute Groesse zu belegen. Fuer Trends und den Vergleich von
-#   Betriebseinstellungen reicht diese Rechnung.
-# =============================================================================
+  attributes:
+    waermeleistung_w: >-
+      {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+      {% set u = (state_attr(thermal_power, 'unit_of_measurement') or 'W') | lower %}
+      {{ (states(thermal_power) | float(0) * f.get(u, 1)) | round(0) }}
+    elektrische_leistung_w: >-
+      {% set f = {'mw': 1000000, 'kw': 1000, 'w': 1} %}
+      {% set u = (state_attr(electrical_power, 'unit_of_measurement') or 'W') | lower %}
+      {{ (states(electrical_power) | float(0) * f.get(u, 1)) | round(0) }}
+    gesperrt_durch: >-
+      {{ expand(blocking_entities) | selectattr('state', 'eq', 'on')
+         | map(attribute='entity_id') | list | join(', ') }}
