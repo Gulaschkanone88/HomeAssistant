@@ -15,6 +15,11 @@
 #   der configuration.yaml.
 #   Eine Oberfläche zum Anlegen gibt es für Template-Blueprints nicht, die
 #   Einbindung läuft über YAML.
+#
+# Namen ohne Umlaute
+#   Home Assistant bildet die Entity-ID aus dem Namen und macht aus „ä“ ein
+#   „a“ statt „ae“. Die Namen unten sind deshalb in ASCII geschrieben, damit
+#   die Verweise wie sensor.wp_waermemenge auf existierende Entitäten zeigen.
 # =============================================================================
 
 template:
@@ -41,7 +46,7 @@ template:
   # Abtauzyklen und Kühlbetrieb liefern negative Werte. Unintegriert würde der
   # Wärmemengenzähler rückwärts laufen.
   # ---------------------------------------------------------------------------
-      - name: "WP Wärmeleistung positiv"
+      - name: "WP Waermeleistung positiv"
         unique_id: wp_waermeleistung_positiv
         unit_of_measurement: "kW"
         device_class: power
@@ -109,7 +114,7 @@ sensor:
   # Geglätteter COP für die Anzeige. 15 Minuten glätten die Takte und bleiben
   # reaktiv; für eine ruhige Dashboard-Kachel 30 bis 60 Minuten.
   - platform: filter
-    name: "WP COP geglättet"
+    name: "WP COP geglaettet"
     unique_id: wp_cop_geglaettet
     entity_id: sensor.wp_cop_aktuell
     filters:
@@ -123,7 +128,7 @@ sensor:
   # auch während langer konstanter Phasen weiter.
   - platform: integration
     source: sensor.wp_waermeleistung_positiv
-    name: "WP Wärmemenge"
+    name: "WP Waermemenge"
     unique_id: wp_waermemenge
     unit_time: h
     method: left
@@ -142,20 +147,20 @@ sensor:
 utility_meter:
   wp_waermemenge_taeglich:
     source: sensor.wp_waermemenge
-    name: "WP Wärmemenge täglich"
+    name: "WP Waermemenge taeglich"
     cycle: daily
   wp_waermemenge_monatlich:
     source: sensor.wp_waermemenge
-    name: "WP Wärmemenge monatlich"
+    name: "WP Waermemenge monatlich"
     cycle: monthly
   wp_waermemenge_jaehrlich:
     source: sensor.wp_waermemenge
-    name: "WP Wärmemenge jährlich"
+    name: "WP Waermemenge jaehrlich"
     cycle: yearly
 
   wp_strom_taeglich:
     source: sensor.hwr_warmepumpe_electric_consumption_kwh
-    name: "WP Strom täglich"
+    name: "WP Strom taeglich"
     cycle: daily
   wp_strom_monatlich:
     source: sensor.hwr_warmepumpe_electric_consumption_kwh
@@ -163,7 +168,7 @@ utility_meter:
     cycle: monthly
   wp_strom_jaehrlich:
     source: sensor.hwr_warmepumpe_electric_consumption_kwh
-    name: "WP Strom jährlich"
+    name: "WP Strom jaehrlich"
     cycle: yearly
 
 # Nach dem Einspielen: Entwicklerwerkzeuge > YAML > Konfiguration prüfen,
