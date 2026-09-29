@@ -1,0 +1,184 @@
+blueprint:
+  name: Bewegungslicht mit Helligkeitsschwelle
+  description: >
+    Schaltet ein oder mehrere Lichter bei Bewegung ein bzw. auf die eingestellte
+    Helligkeit, sofern der Helligkeitssensor unter der Schwelle liegt.
+    Vorher wird der aktuelle Zustand der Lichter gesichert. Ist für die
+    eingestellte Nachlaufzeit keine Bewegung mehr erkannt worden, wird dieser
+    Zustand wiederhergestellt (vorher aus → wieder aus, vorher gedimmt → wieder
+    auf die alte Helligkeit/Farbe).
+  domain: automation
+  homeassistant:
+    min_version: "2024.10.0"
+  input:
+    motion_sensor:
+      name: Bewegungssensor
+      selector:
+        entity:
+          filter:
+            - domain: binary_sensor
+              device_class:
+                - motion
+                - occupancy
+                - presence
+    lux_sensor:
+      name: Helligkeitssensor
+      selector:
+        entity:
+          filter:
+            - domain: sensor
+              device_class: illuminance
+    lux_threshold:
+      name: Helligkeitsschwelle
+      description: Nur wenn die gemessene Helligkeit unter diesem Wert liegt, wird das Licht geschaltet.
+      default: 30
+      selector:
+        number:
+          min: 0
+          max: 2000
+          step: 1
+          unit_of_measurement: lx
+          mode: box
+    lights:
+      name: Lichtquellen
+      selector:
+        entity:
+          multiple: true
+          filter:
+            - domain: light
+    brightness_pct:
+      name: Helligkeit bei Bewegung
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+    color_mode:
+      name: Farbmodus bei Bewegung
+      description: >
+        Keine Änderung = nur Helligkeit setzen, Farbe bleibt wie sie ist.
+        Farbtemperatur = Weißton in Kelvin. RGB-Farbe = beliebige Farbe.
+      default: none
+      selector:
+        select:
+          mode: dropdown
+          options:
+            - label: Keine Änderung
+              value: none
+            - label: Farbtemperatur (Kelvin)
+              value: temp
+            - label: RGB-Farbe
+              value: rgb
+    color_temp_kelvin:
+      name: Farbtemperatur
+      description: Wird nur beim Farbmodus "Farbtemperatur" verwendet.
+      default: 4000
+      selector:
+        color_temp:
+          unit: kelvin
+          min: 2000
+          max: 6500
+    rgb_color:
+      name: RGB-Farbe
+      description: Wird nur beim Farbmodus "RGB-Farbe" verwendet.
+      default: [255, 255, 255]
+      selector:
+        color_rgb: {}
+    no_motion_wait:
+      name: Nachlaufzeit
+      description: So lange muss keine Bewegung mehr erkannt werden, bevor der vorherige Zustand wiederhergestellt wird.
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 3600
+          step: 5
+          unit_of_measurement: s
+          mode: box
+    transition:
+      name: Übergangszeit
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.5
+          unit_of_measurement: s
+          mode: slider
+
+# single: Während das Licht an ist, werden neue Bewegungsauslöser ignoriert.
+# Der Nachlauf-Timer startet trotzdem bei jeder neuen Bewegung neu (siehe wait_for_trigger),
+# und die Sicherung des Ausgangszustands wird nicht durch den "hellen" Zustand überschrieben.
+mode: single
+max_exceeded: silent
+
+triggers:
+  - trigger: state
+    entity_id: !input motion_sensor
+    from: "off"
+    to: "on"
+
+conditions:
+  - condition: numeric_state
+    entity_id: !input lux_sensor
+    below: !input lux_threshold
+
+variables:
+  color_mode: !input color_mode
+
+actions:
+  - variables:
+      scene_id: "bewegungslicht_{{ this.entity_id | replace('automation.', '') }}"
+
+  # Ausgangszustand der Lichter sichern
+  - action: scene.create
+    data:
+      scene_id: "{{ scene_id }}"
+      snapshot_entities: !input lights
+
+  # Licht einschalten bzw. hochdimmen, je nach Farbmodus mit Farbe
+  - choose:
+      - conditions: "{{ color_mode == 'temp' }}"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: !input lights
+            data:
+              brightness_pct: !input brightness_pct
+              color_temp_kelvin: !input color_temp_kelvin
+              transition: !input transition
+      - conditions: "{{ color_mode == 'rgb' }}"
+        sequence:
+          - action: light.turn_on
+            target:
+              entity_id: !input lights
+            data:
+              brightness_pct: !input brightness_pct
+              rgb_color: !input rgb_color
+              transition: !input transition
+    default:
+      - action: light.turn_on
+        target:
+          entity_id: !input lights
+        data:
+          brightness_pct: !input brightness_pct
+          transition: !input transition
+
+  # Warten, bis der Sensor die Nachlaufzeit lang durchgehend "keine Bewegung" meldet.
+  # Kommt zwischendurch neue Bewegung, beginnt die Frist von vorn.
+  - wait_for_trigger:
+      - trigger: state
+        entity_id: !input motion_sensor
+        to: "off"
+        for:
+          seconds: !input no_motion_wait
+
+  # Vorherigen Zustand wiederherstellen
+  - action: scene.turn_on
+    target:
+      entity_id: "scene.{{ scene_id }}"
+    data:
+      transition: !input transition
