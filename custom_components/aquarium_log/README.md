@@ -156,12 +156,30 @@ Veränderung zwischen den Wechseln; bei wenigen Messpunkten ist sie entsprechend
 
 ## Installation
 
+Voraussetzung ist Home Assistant ab 2025.11, getestet mit 2026.2.3.
+
+### Über HACS (empfohlen)
+
+Damit kommen Updates später per Klick.
+
+1. *HACS → ⋮ → Benutzerdefinierte Repositories*, als Repository
+   `https://github.com/Gulaschkanone88/HomeAssistant` und als Typ *Integration* eintragen.
+2. *Aquarium-Tagebuch* in HACS suchen, *Herunterladen*.
+3. Home Assistant neu starten.
+
+HACS lädt ohne GitHub-Release den Stand des Standard-Branches `main`.
+
+### Manuell
+
 1. Den Ordner `custom_components/aquarium_log` nach `config/custom_components/aquarium_log`
    kopieren (Samba, File Editor, Studio Code Server oder SSH).
 2. Home Assistant neu starten.
-3. *Einstellungen → Geräte & Dienste → Integration hinzufügen → Aquarium-Tagebuch*,
+
+### Danach
+
+1. *Einstellungen → Geräte & Dienste → Integration hinzufügen → Aquarium-Tagebuch*,
    Namen des Beckens eingeben und die Wasserwerte des eigenen Testkoffers auswählen.
-4. Auf einem Dashboard die Karte hinzufügen (siehe unten). Die Karte wird von der
+2. Auf einem Dashboard die Karte hinzufügen (siehe unten). Die Karte wird von der
    Integration selbst geladen, eine Dashboard-Ressource ist nicht nötig. Nach einem
    Update der Integration ggf. den Browser-Cache bzw. die App neu laden.
 
