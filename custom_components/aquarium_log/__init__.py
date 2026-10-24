@@ -169,6 +169,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     )
     add_extra_js_url(hass, f"{FRONTEND_URL}/{CARD_FILENAME}?v={integration.version}")
 
+    from .api import async_register_llm_api, async_register_views
+
+    async_register_views(hass)
+    async_register_llm_api(hass)
+
     websocket_api.async_register_command(hass, ws_list)
     websocket_api.async_register_command(hass, ws_subscribe)
     _register_services(hass)

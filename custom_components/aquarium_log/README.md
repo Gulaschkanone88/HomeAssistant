@@ -70,6 +70,67 @@ data:
     - notify.mobile_app_mein_handy
 ```
 
+## Schnittstelle für Auswertungen
+
+Für Analysen gibt es zwei lesende Schnittstellen. Beide rechnen mit derselben Logik
+(`analysis.py`) und liefern JSON.
+
+### KI-Assistenten über MCP
+
+Die Integration meldet in Home Assistant eine eigene LLM-API „Aquarium-Tagebuch“ an. Der
+in Home Assistant eingebaute MCP-Server gibt sie an MCP-fähige Assistenten wie Claude
+weiter. Verfügbare Werkzeuge:
+
+| Werkzeug | Liefert |
+|---|---|
+| `aquarium_summary` | Je Wert: letzter Stand, Grenzen, Status, Mittel/Min/Max, Trend pro Woche, Anteil außerhalb der Grenzen; Wasserwechsel-Statistik; aktive Warnungen |
+| `aquarium_measurements` | Rohdaten der Wassertests, filterbar nach Wert und Zeitraum |
+| `aquarium_events` | Pflegeereignisse, filterbar nach Art und Zeitraum |
+| `aquarium_analyze` | Ein Wert im Detail: Wirkung jedes Wasserwechsels (vorher/nachher), Veränderung pro Tag zwischen den Wechseln, Prognose bis zur Grenze, Messreihe |
+
+Einrichtung:
+
+1. *Einstellungen → Geräte & Dienste → Integration hinzufügen → Model Context Protocol Server*
+   und als API „Aquarium-Tagebuch“ auswählen (zusätzlich „Assist“, wenn der Assistent auch
+   Geräte steuern soll).
+2. Im Benutzerprofil unter *Sicherheit* ein langlebiges Zugriffstoken erstellen.
+3. Den Assistenten auf `https://<deine-ha-adresse>/api/mcp` zeigen lassen, z. B. in Claude Code:
+
+   ```bash
+   claude mcp add --transport http aquarium https://<deine-ha-adresse>/api/mcp \
+     --header "Authorization: Bearer <token>"
+   ```
+
+Danach lassen sich Fragen stellen wie „Wie schnell steigt mein Nitrat zwischen den
+Wasserwechseln?“ oder „Reicht mein Wechselintervall, um unter 50 mg/l zu bleiben?“.
+
+Der Assistent muss Home Assistant über das Netz erreichen. Läuft er auf einem Rechner im
+Heimnetz, genügt die lokale Adresse; ein Assistent in der Cloud braucht eine öffentlich
+erreichbare Adresse, z. B. über Nabu Casa.
+
+### REST-API
+
+Alle Aufrufe brauchen den Header `Authorization: Bearer <token>`. Bei mehreren Becken
+wählt `aquarium=<Name>` das Becken.
+
+| Aufruf | Inhalt |
+|---|---|
+| `GET /api/aquarium_log/summary?days=90` | Überblick wie `aquarium_summary`, `days=0` = alles |
+| `GET /api/aquarium_log/measurements?start=2026-01-01&end=2026-06-30&parameter=no3` | Messungen; `format=csv` liefert CSV |
+| `GET /api/aquarium_log/events?event_type=water_change` | Ereignisse |
+| `GET /api/aquarium_log/analysis/no3?days=180` | Auswertung wie `aquarium_analyze` |
+
+Beispiel:
+
+```bash
+curl -H "Authorization: Bearer $HA_TOKEN" \
+  "https://<deine-ha-adresse>/api/aquarium_log/measurements?format=csv" > aquarium.csv
+```
+
+Für die Auswertung der Wasserwechsel zählt die letzte Messung bis 7 Tage vor und die erste
+Messung bis 3 Tage nach dem Wechsel. Die Prognose rechnet linear mit der mittleren
+Veränderung zwischen den Wechseln; bei wenigen Messpunkten ist sie entsprechend grob.
+
 ## Installation
 
 1. Den Ordner `custom_components/aquarium_log` nach `config/custom_components/aquarium_log`
