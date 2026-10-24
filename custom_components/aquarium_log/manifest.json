@@ -1,0 +1,13 @@
+{
+  "domain": "aquarium_log",
+  "name": "Aquarium-Tagebuch",
+  "after_dependencies": ["recorder"],
+  "codeowners": [],
+  "config_flow": true,
+  "dependencies": ["frontend", "http", "websocket_api"],
+  "documentation": "https://github.com/Gulaschkanone88/homeassistant/tree/main/custom_components/aquarium_log",
+  "integration_type": "device",
+  "iot_class": "local_push",
+  "requirements": [],
+  "version": "1.0.0"
+}

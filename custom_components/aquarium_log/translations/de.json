@@ -1,0 +1,219 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Aquarium einrichten",
+        "description": "Name des Beckens und die Wasserwerte, die du mit deinem Testkoffer misst. Vorausgewählt sind die Tests der sera aqua-test box (+Cl).",
+        "data": {
+          "name": "Name",
+          "parameters": "Wasserwerte"
+        }
+      }
+    },
+    "error": {
+      "invalid_name": "Der Name muss Buchstaben oder Ziffern enthalten.",
+      "no_parameters": "Bitte mindestens einen Wasserwert auswählen."
+    },
+    "abort": {
+      "already_configured": "Ein Aquarium mit diesem Namen ist bereits eingerichtet."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Wasserwerte",
+        "description": "Welche Werte sollen erfasst und angezeigt werden? Bereits gespeicherte Messungen bleiben erhalten.",
+        "data": {
+          "parameters": "Wasserwerte"
+        }
+      }
+    },
+    "error": {
+      "no_parameters": "Bitte mindestens einen Wasserwert auswählen."
+    }
+  },
+  "selector": {
+    "event_type": {
+      "options": {
+        "water_change": "Wasserwechsel",
+        "fertilizer": "Düngung",
+        "conditioner": "Wasseraufbereiter",
+        "filter": "Filterreinigung",
+        "cleaning": "Beckenpflege",
+        "plants": "Pflanzen",
+        "livestock": "Besatz",
+        "medication": "Medikament",
+        "technology": "Technik",
+        "other": "Sonstiges"
+      }
+    }
+  },
+  "services": {
+    "add_measurement": {
+      "name": "Messung erfassen",
+      "description": "Speichert Wasserwerte mit Datum und Uhrzeit.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "timestamp": {
+          "name": "Zeitpunkt",
+          "description": "Datum und Uhrzeit der Messung bzw. des Ereignisses. Leer = jetzt."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Freitext."
+        },
+        "ph": {
+          "name": "pH-Wert",
+          "description": "Messwert."
+        },
+        "kh": {
+          "name": "Karbonathärte (KH)",
+          "description": "Messwert in °dH."
+        },
+        "gh": {
+          "name": "Gesamthärte (GH)",
+          "description": "Messwert in °dH."
+        },
+        "no2": {
+          "name": "Nitrit (NO₂)",
+          "description": "Messwert in mg/l."
+        },
+        "no3": {
+          "name": "Nitrat (NO₃)",
+          "description": "Messwert in mg/l."
+        },
+        "cl": {
+          "name": "Chlor (Cl)",
+          "description": "Messwert in mg/l."
+        },
+        "nh4": {
+          "name": "Ammonium (NH₄)",
+          "description": "Messwert in mg/l."
+        },
+        "po4": {
+          "name": "Phosphat (PO₄)",
+          "description": "Messwert in mg/l."
+        },
+        "fe": {
+          "name": "Eisen (Fe)",
+          "description": "Messwert in mg/l."
+        },
+        "cu": {
+          "name": "Kupfer (Cu)",
+          "description": "Messwert in mg/l."
+        },
+        "co2": {
+          "name": "Kohlendioxid (CO₂)",
+          "description": "Messwert in mg/l."
+        },
+        "o2": {
+          "name": "Sauerstoff (O₂)",
+          "description": "Messwert in mg/l."
+        },
+        "temperature": {
+          "name": "Temperatur",
+          "description": "Messwert in °C."
+        },
+        "conductivity": {
+          "name": "Leitwert",
+          "description": "Messwert in µS/cm."
+        }
+      }
+    },
+    "add_event": {
+      "name": "Ereignis erfassen",
+      "description": "Dokumentiert Wasserwechsel, Düngung, Filterreinigung und andere Veränderungen.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "timestamp": {
+          "name": "Zeitpunkt",
+          "description": "Datum und Uhrzeit der Messung bzw. des Ereignisses. Leer = jetzt."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Freitext."
+        },
+        "event_type": {
+          "name": "Art",
+          "description": "Art des Ereignisses."
+        },
+        "volume_liters": {
+          "name": "Menge",
+          "description": "Gewechselte oder zugegebene Menge in Litern."
+        },
+        "percent": {
+          "name": "Anteil",
+          "description": "Anteil am Beckenvolumen in Prozent."
+        }
+      }
+    },
+    "update_item": {
+      "name": "Eintrag ändern",
+      "description": "Ändert eine Messung oder ein Ereignis.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "timestamp": {
+          "name": "Zeitpunkt",
+          "description": "Datum und Uhrzeit der Messung bzw. des Ereignisses. Leer = jetzt."
+        },
+        "note": {
+          "name": "Notiz",
+          "description": "Freitext."
+        },
+        "event_type": {
+          "name": "Art",
+          "description": "Art des Ereignisses."
+        },
+        "volume_liters": {
+          "name": "Menge",
+          "description": "Gewechselte oder zugegebene Menge in Litern."
+        },
+        "percent": {
+          "name": "Anteil",
+          "description": "Anteil am Beckenvolumen in Prozent."
+        },
+        "item_id": {
+          "name": "Eintrags-ID",
+          "description": "ID des Eintrags (siehe Export oder Tagebuch-Karte)."
+        },
+        "values": {
+          "name": "Werte",
+          "description": "Neue Messwerte als Objekt, z. B. {\"no3\": 25}. Ersetzt alle Werte der Messung."
+        }
+      }
+    },
+    "delete_item": {
+      "name": "Eintrag löschen",
+      "description": "Löscht eine Messung oder ein Ereignis endgültig.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "item_id": {
+          "name": "Eintrags-ID",
+          "description": "ID des Eintrags (siehe Export oder Tagebuch-Karte)."
+        }
+      }
+    },
+    "export": {
+      "name": "Exportieren",
+      "description": "Gibt alle Einträge als Liste und als CSV zurück.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        }
+      }
+    }
+  }
+}
