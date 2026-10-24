@@ -101,6 +101,8 @@ class AquariumLogCard extends HTMLElement {
     if (this._config?.entry_id) msg.entry_id = this._config.entry_id;
     this._unsub = this._hass.connection.subscribeMessage((data) => {
       this._data = data;
+      // Unveränderte Grenzwert-Eingaben mit dem neuen Stand vom Server füllen.
+      if (!this._limitDirty) this._limitForm = null;
       this._render();
     }, msg);
     this._unsub.catch((err) => {
@@ -122,7 +124,40 @@ class AquariumLogCard extends HTMLElement {
     };
   }
 
+  _limit(key) {
+    const l = this._data?.settings?.limits?.[key] ?? {};
+    return { min: l.min ?? null, max: l.max ?? null };
+  }
+
+  _outOfRange(key, value) {
+    const { min, max } = this._limit(key);
+    return (min !== null && value < min) || (max !== null && value > max);
+  }
+
+  _rangeText(param) {
+    const { min, max } = this._limit(param.key);
+    const unit = param.unit ? ` ${param.unit}` : "";
+    if (min !== null && max !== null) return `${nf(min)}–${nf(max)}${unit}`;
+    if (max !== null) return `max. ${nf(max)}${unit}`;
+    if (min !== null) return `min. ${nf(min)}${unit}`;
+    return "";
+  }
+
   // ---------- Rendering ----------
+
+  _renderBanner() {
+    const violations = Object.values(this._data?.violations ?? {});
+    if (!violations.length) return "";
+    const lines = violations
+      .map((v) => {
+        const p = this._data.parameters.find((x) => x.key === v.parameter);
+        const unit = v.unit ? ` ${v.unit}` : "";
+        return `<div><b>${esc(v.name)}</b> ${v.direction === "above" ? "über" : "unter"} Grenze: ${nf(v.value)}${esc(unit)}
+          (Soll ${esc(p ? this._rangeText(p) : "")}, ${v.count}× in Folge)</div>`;
+      })
+      .join("");
+    return `<div class="banner">${lines}</div>`;
+  }
 
   _render() {
     const title = this._config?.title ?? this._data?.title ?? "Aquarium";
@@ -131,6 +166,7 @@ class AquariumLogCard extends HTMLElement {
     else if (!this._data) body = `<div class="empty">Lade Daten …</div>`;
     else if (this._tab === "add") body = this._renderForm();
     else if (this._tab === "chart") body = this._renderCharts();
+    else if (this._tab === "limits") body = this._renderLimits();
     else body = this._renderJournal();
 
     const tab = (key, label) =>
@@ -141,8 +177,9 @@ class AquariumLogCard extends HTMLElement {
       <ha-card>
         <div class="header">
           <div class="title">${esc(title)}</div>
-          <div class="tabs">${tab("add", "Erfassen")}${tab("chart", "Verlauf")}${tab("journal", "Tagebuch")}</div>
+          <div class="tabs">${tab("add", "Erfassen")}${tab("chart", "Verlauf")}${tab("journal", "Tagebuch")}${tab("limits", "Grenzen")}</div>
         </div>
+        ${this._renderBanner()}
         <div class="content">${body}</div>
       </ha-card>`;
     this._bind();
@@ -166,9 +203,11 @@ class AquariumLogCard extends HTMLElement {
             <span>${esc(p.name)}</span>
             <div class="input-unit">
               <input type="text" inputmode="decimal" data-value="${p.key}"
+                     class="${this._inputBad(p.key, f.values[p.key]) ? "bad" : ""}"
                      value="${esc(f.values[p.key] ?? "")}" placeholder="–" autocomplete="off">
               <span class="unit">${esc(p.unit ?? "")}</span>
             </div>
+            ${this._rangeText(p) ? `<span class="hint">Soll ${esc(this._rangeText(p))}</span>` : ""}
           </label>`
         )
         .join("")}</div>`;
@@ -204,6 +243,11 @@ class AquariumLogCard extends HTMLElement {
           ${editing ? "Änderung speichern" : "Speichern"}
         </button>
       </div>`;
+  }
+
+  _inputBad(key, text) {
+    const v = parseNumber(text);
+    return v !== null && !Number.isNaN(v) && this._outOfRange(key, v);
   }
 
   _rangeItems() {
@@ -256,8 +300,10 @@ class AquariumLogCard extends HTMLElement {
 
   _chart(param, points, events, t0, t1) {
     const W = 600, H = 150, L = 46, R = 10, T = 22, B = 22;
-    let vmin = Math.min(...points.map((p) => p.v));
-    let vmax = Math.max(...points.map((p) => p.v));
+    const limit = this._limit(param.key);
+    const bounds = [limit.min, limit.max].filter((v) => v !== null);
+    let vmin = Math.min(...points.map((p) => p.v), ...bounds);
+    let vmax = Math.max(...points.map((p) => p.v), ...bounds);
     if (vmin === vmax) {
       const pad = Math.abs(vmin) * 0.1 || 1;
       vmin -= pad;
@@ -279,6 +325,19 @@ class AquariumLogCard extends HTMLElement {
       )
       .join("");
 
+    // Sollbereich als Band, Grenzen als gestrichelte Linien
+    let band = "";
+    if (limit.min !== null || limit.max !== null) {
+      const top = limit.max !== null ? y(limit.max) : T;
+      const bottom = limit.min !== null ? y(limit.min) : H - B;
+      if (bottom > top) band += `<rect x="${L}" y="${top}" width="${W - L - R}" height="${bottom - top}" class="band"/>`;
+      for (const [v, label] of [[limit.min, "min"], [limit.max, "max"]]) {
+        if (v === null) continue;
+        band += `<line x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}" class="limit"/>
+          <text x="${W - R - 2}" y="${y(v) - 3}" class="limit-label" text-anchor="end">${label} ${nf(v)}</text>`;
+      }
+    }
+
     const marks = events
       .map((e) => {
         const ex = x(Date.parse(e.timestamp));
@@ -297,7 +356,7 @@ class AquariumLogCard extends HTMLElement {
     const path = sorted.map((p, i) => `${i ? "L" : "M"}${x(p.t).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ");
     const dots = sorted
       .map(
-        (p) => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="4" class="dot">
+        (p) => `<circle cx="${x(p.t)}" cy="${y(p.v)}" r="4" class="dot ${this._outOfRange(param.key, p.v) ? "bad" : ""}">
           <title>${esc(`${nf(p.v)}${unit} – ${formatDate(new Date(p.t).toISOString())}`)}</title></circle>`
       )
       .join("");
@@ -309,10 +368,10 @@ class AquariumLogCard extends HTMLElement {
       <div class="chart">
         <div class="chart-head">
           <span>${esc(param.name)}</span>
-          <span class="latest">${nf(last.v)}${esc(unit)}</span>
+          <span class="latest ${this._outOfRange(param.key, last.v) ? "bad" : ""}">${nf(last.v)}${esc(unit)}</span>
         </div>
         <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(param.name)}">
-          ${grid}${marks}
+          ${band}${grid}${marks}
           <path d="${path}" class="line"/>
           ${dots}
           <text x="${L}" y="${H - 5}" class="axis">${dateLabel(t0)}</text>
@@ -334,7 +393,8 @@ class AquariumLogCard extends HTMLElement {
             .map(([k, v]) => {
               const p = params[k];
               const name = p ? p.name.replace(/\s*\(.*\)/, "") : k.toUpperCase();
-              return `<span class="val">${esc(name)} <b>${nf(v)}</b>${p?.unit ? ` ${esc(p.unit)}` : ""}</span>`;
+              const bad = this._outOfRange(k, v) ? " bad" : "";
+              return `<span class="val${bad}">${esc(name)} <b>${nf(v)}</b>${p?.unit ? ` ${esc(p.unit)}` : ""}</span>`;
             })
             .join("");
         } else {
@@ -360,6 +420,105 @@ class AquariumLogCard extends HTMLElement {
       .join("")}</div>`;
   }
 
+  _notifyServices() {
+    const skip = new Set(["notify", "send_message", "persistent_notification"]);
+    return Object.keys(this._hass?.services?.notify ?? {})
+      .filter((name) => !skip.has(name))
+      .sort()
+      .map((name) => `notify.${name}`);
+  }
+
+  _initLimitForm() {
+    const s = this._data.settings;
+    this._limitDirty = false;
+    this._limitForm = {
+      limits: Object.fromEntries(
+        this._data.parameters.map((p) => {
+          const l = this._limit(p.key);
+          return [p.key, { min: l.min !== null ? nf(l.min, 4) : "", max: l.max !== null ? nf(l.max, 4) : "" }];
+        })
+      ),
+      alertCount: String(s.alert_count ?? 2),
+      persistent: s.persistent_notification !== false,
+      notify: [...(s.notify_services ?? [])],
+    };
+  }
+
+  _renderLimits() {
+    if (!this._limitForm) this._initLimitForm();
+    const f = this._limitForm;
+    const rows = this._data.parameters
+      .map(
+        (p) => `
+        <div class="limit-row">
+          <span class="limit-name">${esc(p.name)}</span>
+          <div class="input-unit"><input type="text" inputmode="decimal" data-limit="${p.key}" data-bound="min"
+               value="${esc(f.limits[p.key]?.min ?? "")}" placeholder="min"><span class="unit">${esc(p.unit ?? "")}</span></div>
+          <div class="input-unit"><input type="text" inputmode="decimal" data-limit="${p.key}" data-bound="max"
+               value="${esc(f.limits[p.key]?.max ?? "")}" placeholder="max"><span class="unit">${esc(p.unit ?? "")}</span></div>
+        </div>`
+      )
+      .join("");
+    const services = [...new Set([...this._notifyServices(), ...f.notify])];
+    const pushes = services.length
+      ? services
+          .map(
+            (svc) => `<label class="check"><input type="checkbox" data-notify="${esc(svc)}" ${f.notify.includes(svc) ? "checked" : ""}> ${esc(svc)}</label>`
+          )
+          .join("")
+      : `<div class="hint">Keine notify-Dienste gefunden. Die Companion App legt sie als notify.mobile_app_… an.</div>`;
+    const msg = this._message
+      ? `<div class="msg ${this._message.error ? "error" : "ok"}">${esc(this._message.text)}</div>`
+      : "";
+    return `
+      <div class="hint">Leeres Feld = keine Grenze. Die Grenzen erscheinen im Verlauf als Band.</div>
+      <div class="limit-row head"><span></span><span>Minimum</span><span>Maximum</span></div>
+      ${rows}
+      <h4>Meldungen</h4>
+      <label class="field wide"><span>Meldung ab so vielen Messungen in Folge außerhalb der Grenze</span>
+        <input type="text" inputmode="numeric" data-lf="alertCount" value="${esc(f.alertCount)}" class="short">
+      </label>
+      <label class="check"><input type="checkbox" data-lf="persistent" ${f.persistent ? "checked" : ""}> Benachrichtigung in Home Assistant</label>
+      <div class="subhead">Push aufs Handy</div>
+      ${pushes}
+      ${msg}
+      <div class="actions">
+        <button class="btn secondary" data-action="limits-reset">Zurücksetzen</button>
+        <button class="btn primary" data-action="limits-save" ${this._busy ? "disabled" : ""}>Speichern</button>
+      </div>`;
+  }
+
+  async _saveLimits() {
+    const f = this._limitForm;
+    const limits = {};
+    for (const p of this._data.parameters) {
+      const min = parseNumber(f.limits[p.key]?.min);
+      const max = parseNumber(f.limits[p.key]?.max);
+      if (Number.isNaN(min) || Number.isNaN(max)) return this._fail(`${p.name}: ungültiger Wert.`);
+      if (min !== null && max !== null && min > max) return this._fail(`${p.name}: Minimum liegt über dem Maximum.`);
+      limits[p.key] = { min, max };
+    }
+    const count = Number(f.alertCount);
+    if (!Number.isInteger(count) || count < 1 || count > 20) return this._fail("Anzahl Messungen: ganze Zahl von 1 bis 20.");
+    this._busy = true;
+    this._render();
+    try {
+      await this._call("configure", {
+        limits,
+        alert_count: count,
+        persistent_notification: f.persistent,
+        notify_services: f.notify,
+      });
+      this._message = { text: "Gespeichert." };
+      this._limitForm = null;
+      this._limitDirty = false;
+    } catch (err) {
+      this._message = { error: true, text: `Speichern fehlgeschlagen: ${err.message || err}` };
+    }
+    this._busy = false;
+    this._render();
+  }
+
   // ---------- Interaktion ----------
 
   _bind() {
@@ -368,6 +527,8 @@ class AquariumLogCard extends HTMLElement {
       el.addEventListener("click", () => {
         this._tab = el.dataset.tab;
         this._message = null;
+        this._limitForm = null;
+        this._limitDirty = false;
         this._render();
       })
     );
@@ -387,6 +548,7 @@ class AquariumLogCard extends HTMLElement {
     root.querySelectorAll("[data-value]").forEach((el) =>
       el.addEventListener("input", () => {
         this._form.values[el.dataset.value] = el.value;
+        el.classList.toggle("bad", this._inputBad(el.dataset.value, el.value));
       })
     );
     root.querySelectorAll("[data-field]").forEach((el) =>
@@ -395,6 +557,36 @@ class AquariumLogCard extends HTMLElement {
       })
     );
     root.querySelector('[data-action="save"]')?.addEventListener("click", () => this._save());
+    root.querySelectorAll("[data-limit]").forEach((el) =>
+      el.addEventListener("input", () => {
+        this._limitForm.limits[el.dataset.limit][el.dataset.bound] = el.value;
+        this._limitDirty = true;
+      })
+    );
+    root.querySelector('[data-lf="alertCount"]')?.addEventListener("input", (ev) => {
+      this._limitForm.alertCount = ev.target.value;
+      this._limitDirty = true;
+    });
+    root.querySelector('[data-lf="persistent"]')?.addEventListener("change", (ev) => {
+      this._limitForm.persistent = ev.target.checked;
+      this._limitDirty = true;
+    });
+    root.querySelectorAll("[data-notify]").forEach((el) =>
+      el.addEventListener("change", () => {
+        const set = new Set(this._limitForm.notify);
+        if (el.checked) set.add(el.dataset.notify);
+        else set.delete(el.dataset.notify);
+        this._limitForm.notify = [...set];
+        this._limitDirty = true;
+      })
+    );
+    root.querySelector('[data-action="limits-save"]')?.addEventListener("click", () => this._saveLimits());
+    root.querySelector('[data-action="limits-reset"]')?.addEventListener("click", () => {
+      this._limitForm = null;
+      this._limitDirty = false;
+      this._message = null;
+      this._render();
+    });
     root.querySelector('[data-action="cancel"]')?.addEventListener("click", () => {
       this._form = this._emptyForm();
       this._message = null;
@@ -563,6 +755,24 @@ const STYLE = `
   .when { font-size: .9em; color: var(--secondary-text-color); }
   .icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); font-size: 1.05em; padding: 4px 6px; }
   .vals { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: .95em; }
+  .hint { font-size: .8em; color: var(--secondary-text-color); }
+  input.bad, .val.bad b, .latest.bad { color: var(--error-color, #db4437); }
+  input.bad { border-color: var(--error-color, #db4437); }
+  .val.bad { color: var(--error-color, #db4437); }
+  svg .band { fill: var(--success-color, #43a047); opacity: .12; }
+  svg .limit { stroke: var(--error-color, #db4437); stroke-width: 1; stroke-dasharray: 6 4; opacity: .7; }
+  svg .limit-label { fill: var(--error-color, #db4437); font-size: 10px; opacity: .8; }
+  svg .dot.bad { stroke: var(--error-color, #db4437); fill: var(--error-color, #db4437); }
+  .banner { margin: 12px 16px 0; padding: 10px 12px; border-radius: 8px; font-size: .9em; line-height: 1.5;
+            background: rgba(219,68,55,.12); color: var(--error-color, #db4437); }
+  .limit-row { display: grid; grid-template-columns: 1.4fr 1fr 1fr; gap: 8px; align-items: center; margin: 6px 0; }
+  .limit-row.head { font-size: .8em; color: var(--secondary-text-color); margin-top: 10px; }
+  .limit-name { font-size: .9em; }
+  h4 { margin: 18px 0 8px; font-weight: 500; }
+  .subhead { font-size: .85em; color: var(--secondary-text-color); margin: 10px 0 4px; }
+  .check { display: flex; align-items: center; gap: 8px; margin: 6px 0; font-size: .95em; }
+  .check input { width: auto; }
+  input.short { max-width: 100px; }
   .note { margin-top: 4px; font-size: .9em; color: var(--secondary-text-color); white-space: pre-wrap; }
 `;
 

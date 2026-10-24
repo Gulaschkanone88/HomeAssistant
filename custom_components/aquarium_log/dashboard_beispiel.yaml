@@ -13,6 +13,8 @@ views:
             default_tab: add
       - cards:
           - type: tile
+            entity: binary_sensor.aquarium_grenzwertwarnung
+          - type: tile
             entity: sensor.aquarium_letzter_wasserwechsel
           - type: statistics-graph
             title: Nitrit und Nitrat

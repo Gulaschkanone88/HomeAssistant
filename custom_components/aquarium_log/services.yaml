@@ -237,6 +237,31 @@ delete_item:
       selector:
         text:
 
+configure:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: aquarium_log
+    limits:
+      example: '{"no3": {"min": null, "max": 40}}'
+      selector:
+        object:
+    alert_count:
+      selector:
+        number:
+          min: 1
+          max: 20
+          mode: box
+    persistent_notification:
+      selector:
+        boolean:
+    notify_services:
+      example: notify.mobile_app_mein_handy
+      selector:
+        text:
+          multiple: true
+
 export:
   fields:
     config_entry_id:

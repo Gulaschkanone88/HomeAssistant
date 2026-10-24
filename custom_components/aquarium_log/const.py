@@ -70,3 +70,21 @@ EVENT_TYPES: dict[str, str] = {
     "technology": "Technik",
     "other": "Sonstiges",
 }
+
+# Startwerte der Grenzen für ein Süßwasser-Gesellschaftsbecken, in der Karte änderbar.
+# KH, GH, NO2, NO3: sera-Richtwerte für das Gesellschaftsaquarium.
+# pH: verbreitete Händler-/Herstellertabelle für Süßwasser mit Fischen.
+# Cl: jede nachweisbare Menge (sera Cl-Test ab 0,02 mg/l) ist schädlich.
+DEFAULT_LIMITS: dict[str, dict[str, float | None]] = {
+    "ph": {"min": 6.5, "max": 7.5},
+    "kh": {"min": 5, "max": 10},
+    "gh": {"min": 5, "max": 15},
+    "no2": {"min": None, "max": 0.5},
+    "no3": {"min": None, "max": 50},
+    "cl": {"min": None, "max": 0},
+}
+
+DEFAULT_ALERT_COUNT = 2
+
+EVENT_LIMIT_EXCEEDED = f"{DOMAIN}_limit_exceeded"
+EVENT_LIMIT_CLEARED = f"{DOMAIN}_limit_cleared"

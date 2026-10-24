@@ -50,10 +50,11 @@ from .const import (
     PARAMETERS_BY_KEY,
     SIGNAL_UPDATED,
 )
+from .alerts import AlertManager
 from .data import AquariumLog
 from .statistics import async_rebuild_statistics
 
-PLATFORMS = [Platform.CALENDAR, Platform.SENSOR]
+PLATFORMS = [Platform.BINARY_SENSOR, Platform.CALENDAR, Platform.SENSOR]
 
 CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
@@ -97,6 +98,23 @@ DELETE_ITEM_SCHEMA = vol.Schema(
 )
 
 EXPORT_SCHEMA = vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string})
+
+_OPTIONAL_NUMBER = vol.Any(None, vol.Coerce(float))
+
+CONFIGURE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Optional("limits"): {
+            vol.In(list(PARAMETERS_BY_KEY)): {
+                vol.Optional("min"): _OPTIONAL_NUMBER,
+                vol.Optional("max"): _OPTIONAL_NUMBER,
+            }
+        },
+        vol.Optional("alert_count"): vol.All(vol.Coerce(int), vol.Range(1, 20)),
+        vol.Optional("persistent_notification"): cv.boolean,
+        vol.Optional("notify_services"): vol.All(cv.ensure_list, [cv.string]),
+    }
+)
 
 
 @dataclass
@@ -172,9 +190,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: AquariumConfigEntry) -> 
             hass, log, entry.runtime_data.slug, entry.title, enabled_parameters(entry)
         )
 
+    alerts = AlertManager(hass, entry, log)
+
     @callback
     def _on_update() -> None:
         entry.async_create_background_task(hass, _rebuild(), f"{DOMAIN}_statistics")
+        entry.async_create_background_task(
+            hass, alerts.async_check(enabled_parameters(entry)), f"{DOMAIN}_alerts"
+        )
 
     entry.async_on_unload(
         async_dispatcher_connect(hass, SIGNAL_UPDATED.format(entry.entry_id), _on_update)
@@ -259,6 +282,14 @@ def _register_services(hass: HomeAssistant) -> None:
         items = entry.runtime_data.log.items
         return {"items": items, "csv": _to_csv(items)}
 
+    async def configure(call: ServiceCall) -> None:
+        entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
+        changes = {k: v for k, v in call.data.items() if k != ATTR_ENTRY_ID}
+        try:
+            await entry.runtime_data.log.async_update_settings(changes)
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
     optional = SupportsResponse.OPTIONAL
     hass.services.async_register(
         DOMAIN, "add_measurement", add_measurement, ADD_MEASUREMENT_SCHEMA, optional
@@ -268,6 +299,7 @@ def _register_services(hass: HomeAssistant) -> None:
         DOMAIN, "update_item", update_item, UPDATE_ITEM_SCHEMA, optional
     )
     hass.services.async_register(DOMAIN, "delete_item", delete_item, DELETE_ITEM_SCHEMA)
+    hass.services.async_register(DOMAIN, "configure", configure, CONFIGURE_SCHEMA)
     hass.services.async_register(
         DOMAIN, "export", export, EXPORT_SCHEMA, SupportsResponse.ONLY
     )
@@ -297,6 +329,7 @@ def _to_csv(items: list[dict[str, Any]]) -> str:
 
 
 def _payload(entry: AquariumConfigEntry) -> dict[str, Any]:
+    log = entry.runtime_data.log
     return {
         "entry_id": entry.entry_id,
         "title": entry.title,
@@ -311,7 +344,9 @@ def _payload(entry: AquariumConfigEntry) -> dict[str, Any]:
             for p in (PARAMETERS_BY_KEY[k] for k in enabled_parameters(entry))
         ],
         "event_types": EVENT_TYPES,
-        "items": entry.runtime_data.log.items,
+        "items": log.items,
+        "settings": log.settings,
+        "violations": log.violations(enabled_parameters(entry)),
     }
 
 

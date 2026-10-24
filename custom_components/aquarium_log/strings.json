@@ -205,6 +205,32 @@
         }
       }
     },
+    "configure": {
+      "name": "Grenzwerte und Meldungen einstellen",
+      "description": "Setzt Min-/Max-Grenzen je Wasserwert und legt fest, wann und wohin gemeldet wird.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "limits": {
+          "name": "Grenzen",
+          "description": "Je Wasserwert min und max, null = keine Grenze. Nicht genannte Werte bleiben unverändert."
+        },
+        "alert_count": {
+          "name": "Messungen in Folge",
+          "description": "Ab so vielen Messungen in Folge außerhalb der Grenze wird gemeldet."
+        },
+        "persistent_notification": {
+          "name": "HA-Benachrichtigung",
+          "description": "Meldung als Benachrichtigung in Home Assistant anzeigen."
+        },
+        "notify_services": {
+          "name": "Push-Dienste",
+          "description": "notify-Dienste für Push-Meldungen, z. B. notify.mobile_app_mein_handy."
+        }
+      }
+    },
     "export": {
       "name": "Exportieren",
       "description": "Gibt alle Einträge als Liste und als CSV zurück.",

@@ -12,8 +12,9 @@ Statistik-Schnittstelle in der verwendeten Form gibt es erst seit 2025.11.
 
 | Bestandteil | Zweck |
 |---|---|
-| Dashboard-Karte `custom:aquarium-log-card` | Eingabe (Wassertest oder Ereignis), Verlauf je Wert mit eingezeichneten Ereignissen, Tagebuch mit Bearbeiten und Löschen |
-| Sensor je Wasserwert, z. B. `sensor.aquarium_ph_wert` | Jüngster Messwert nach Messzeitpunkt, Attribut `measured_at` |
+| Dashboard-Karte `custom:aquarium-log-card` | Eingabe (Wassertest oder Ereignis), Verlauf je Wert mit Sollbereich und eingezeichneten Ereignissen, Tagebuch mit Bearbeiten und Löschen, Grenzwerte und Meldungen einstellen |
+| Sensor je Wasserwert, z. B. `sensor.aquarium_ph_wert` | Jüngster Messwert nach Messzeitpunkt, Attribute `measured_at`, `min`, `max`, `out_of_range` |
+| `binary_sensor.aquarium_grenzwertwarnung` | An, solange ein Wert mehrfach in Folge außerhalb seiner Grenzen liegt; Details im Attribut `violations` |
 | `sensor.aquarium_letzter_wasserwechsel` | Zeitpunkt des letzten Wasserwechsels mit Menge und Anteil |
 | `calendar.aquarium_tagebuch` | Alle Messungen und Ereignisse als Kalendereinträge |
 | Langzeitstatistik `aquarium_log:<becken>_<wert>` | Vollständiger Verlauf inklusive nachgetragener Werte für die Statistik-Diagramm-Karte und den Statistik-Bereich der Entwicklerwerkzeuge |
@@ -25,6 +26,49 @@ Vorausgewählt sind die Tests der sera aqua-test box (+Cl): pH, KH, GH, Nitrit,
 Nitrat und Chlor. Ammonium, Phosphat, Eisen, Kupfer, CO₂, Sauerstoff, Temperatur und
 Leitwert lassen sich jederzeit über *Konfigurieren* zuschalten. Bereits gespeicherte
 Messungen gehen beim Abwählen nicht verloren.
+
+## Grenzwerte und Meldungen
+
+Im Reiter *Grenzen* der Karte stehen Minimum und Maximum je Wasserwert. Ein leeres Feld
+bedeutet keine Grenze. Im Verlauf erscheint der Sollbereich als grünes Band mit
+gestrichelten Grenzlinien, Messpunkte außerhalb sind rot. Beim Erfassen zeigt jedes Feld
+seinen Sollbereich und färbt sich rot, sobald der eingetippte Wert außerhalb liegt.
+
+Vorbelegt sind Richtwerte für ein Süßwasser-Gesellschaftsbecken. Sie sind ein
+Ausgangspunkt, keine Empfehlung für einen bestimmten Besatz:
+
+| Wert | Start-Grenzen | Herkunft |
+|---|---|---|
+| pH | 6,5–7,5 | Händler-/Herstellertabelle „Süßwasser mit Fischen“ |
+| KH | 5–10 °dH | sera, Gesellschaftsaquarium |
+| GH | 5–15 °dH | sera |
+| Nitrit | max. 0,5 mg/l | sera (ideal: nicht nachweisbar) |
+| Nitrat | max. 50 mg/l | sera |
+| Chlor | max. 0 mg/l | sera Cl-Test: jede nachweisbare Menge ist schädlich |
+
+Eine Meldung entsteht, wenn die jüngsten Messungen eines Werts mehrfach in Folge außerhalb
+der Grenzen liegen (Standard 2, einstellbar). Gemeldet wird einmal beim Überschreiten:
+
+| Kanal | Verhalten |
+|---|---|
+| Benachrichtigung in Home Assistant | Erscheint unter der Glocke und verschwindet von selbst, sobald eine Messung wieder im Bereich liegt (abschaltbar) |
+| Push aufs Handy | An alle in der Karte angehakten `notify.*`-Dienste, z. B. `notify.mobile_app_<handy>` der Companion App |
+| Ereignisse | `aquarium_log_limit_exceeded` und `aquarium_log_limit_cleared` für eigene Automationen |
+| Binärsensor | `binary_sensor.aquarium_grenzwertwarnung` |
+
+Einstellen geht auch per Dienst:
+
+```yaml
+action: aquarium_log.configure
+data:
+  limits:
+    no3:
+      min: null
+      max: 25
+  alert_count: 2
+  notify_services:
+    - notify.mobile_app_mein_handy
+```
 
 ## Installation
 
@@ -51,7 +95,7 @@ Optionen der Karte:
 |---|---|---|
 | `title` | Name des Beckens | Überschrift |
 | `days` | `90` | Voreingestellter Zeitraum im Verlauf (`0` = alles) |
-| `default_tab` | `add` | Starttab: `add`, `chart` oder `journal` |
+| `default_tab` | `add` | Starttab: `add`, `chart`, `journal` oder `limits` |
 | `entry_id` | – | Nur nötig, wenn mehrere Becken eingerichtet sind |
 
 Ein vollständiges Beispiel mit Karte, Statistik-Diagramm und Kalender steht in
@@ -73,6 +117,7 @@ Skripten oder per REST-API nutzen.
 | `aquarium_log.add_event` | Ereignis speichern: `water_change`, `fertilizer`, `conditioner`, `filter`, `cleaning`, `plants`, `livestock`, `medication`, `technology`, `other` |
 | `aquarium_log.update_item` | Eintrag ändern |
 | `aquarium_log.delete_item` | Eintrag löschen |
+| `aquarium_log.configure` | Grenzwerte, Anzahl Messungen bis zur Meldung, Meldekanäle |
 | `aquarium_log.export` | Alle Einträge als Liste und CSV (Semikolon-getrennt) zurückgeben |
 
 Beispiel, alte Notizbuchwerte nachtragen:
@@ -119,5 +164,5 @@ Die Statistik speichert stündliche Mittelwerte. Zwei Messungen desselben Werts 
 derselben Stunde werden dort gemittelt; im Tagebuch und in der Karte bleiben beide
 einzeln sichtbar.
 
-Grenz- oder Zielwerte für die einzelnen Parameter sind bewusst nicht hinterlegt, weil
-sie stark vom Besatz abhängen.
+Bewertet wird immer die Reihenfolge nach Messzeitpunkt. Ein nachgetragener alter Wert
+löst deshalb nur dann eine Meldung aus, wenn er zu den jüngsten Messungen gehört.

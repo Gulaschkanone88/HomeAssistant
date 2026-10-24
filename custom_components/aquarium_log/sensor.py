@@ -77,11 +77,17 @@ class AquariumParameterSensor(AquariumEntity):
         attrs: dict[str, Any] = {
             "statistic_id": statistic_id(self._entry.runtime_data.slug, self._param.key)
         }
+        low, high = self._log.limit(self._param.key)
+        attrs["min"] = low
+        attrs["max"] = high
         if latest is None:
             self._attr_native_value = None
         else:
             self._attr_native_value = latest[0]
             attrs["measured_at"] = latest[1]
+            attrs["out_of_range"] = (low is not None and latest[0] < low) or (
+                high is not None and latest[0] > high
+            )
         self._attr_extra_state_attributes = attrs
 
 
