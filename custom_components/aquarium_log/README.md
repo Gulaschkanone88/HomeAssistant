@@ -39,12 +39,23 @@ Ausgangspunkt, keine Empfehlung für einen bestimmten Besatz:
 
 | Wert | Start-Grenzen | Herkunft |
 |---|---|---|
-| pH | 6,5–7,5 | Händler-/Herstellertabelle „Süßwasser mit Fischen“ |
+| pH | 6,5–7,5 | Händler-/Herstellertabellen „Süßwasser mit Fischen“ |
 | KH | 5–10 °dH | sera, Gesellschaftsaquarium |
 | GH | 5–15 °dH | sera |
 | Nitrit | max. 0,5 mg/l | sera (ideal: nicht nachweisbar) |
 | Nitrat | max. 50 mg/l | sera |
 | Chlor | max. 0 mg/l | sera Cl-Test: jede nachweisbare Menge ist schädlich |
+| Ammonium | max. 0,25 mg/l | JBL-Bereich laut Händlerangaben |
+| Phosphat | max. 1,0 mg/l | sera; JBL nennt strenger 0–0,4 mg/l |
+| Eisen | max. 0,5 mg/l | sera: darüber schädlich, ideal direkt nach Düngung 0,25–0,5 mg/l |
+| Kupfer | max. 0,03 mg/l | Händler-Ratgeber, schon geringe Mengen giftig für Wirbellose |
+| CO₂ | max. 25 mg/l | obere Grenze der genannten Bereiche; Quellen schwanken zwischen 10–25 und 20–30 mg/l |
+| Sauerstoff | min. 5 mg/l | JBL-Bereich 5–8 mg/l laut Händlerangaben |
+| Temperatur | 24–26 °C | Herstellerangaben für tropische Zierfische |
+| Leitwert | keine | kein belastbarer allgemeiner Richtwert gefunden |
+
+Bei bestehenden Installationen bleiben gespeicherte Grenzen erhalten; nur Werte, für die
+noch keine Grenze gespeichert war, bekommen nach dem Update die Vorgabe.
 
 Eine Meldung entsteht, wenn die jüngsten Messungen eines Werts mehrfach in Folge außerhalb
 der Grenzen liegen (Standard 2, einstellbar). Gemeldet wird einmal beim Überschreiten:

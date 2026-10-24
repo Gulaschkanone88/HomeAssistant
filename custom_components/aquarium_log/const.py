@@ -72,9 +72,14 @@ EVENT_TYPES: dict[str, str] = {
 }
 
 # Startwerte der Grenzen für ein Süßwasser-Gesellschaftsbecken, in der Karte änderbar.
-# KH, GH, NO2, NO3: sera-Richtwerte für das Gesellschaftsaquarium.
-# pH: verbreitete Händler-/Herstellertabelle für Süßwasser mit Fischen.
+# KH, GH, NO2, NO3, PO4, Fe: sera-Richtwerte (Ratgeber Aquariumpflege, Gebrauchsinformationen).
+# pH, NH4, O2: verbreitete Händler-/Herstellertabellen (JBL-Bereiche) für Süßwasser mit Fischen.
 # Cl: jede nachweisbare Menge (sera Cl-Test ab 0,02 mg/l) ist schädlich.
+# Cu: Händler-Ratgeber, schon geringe Mengen giftig für Wirbellose.
+# CO2: obere Grenze der genannten Bereiche (10–25 mg/l); ohne CO2-Düngung liegt der Wert
+#      deutlich darunter, deshalb keine Untergrenze.
+# Temperatur: Herstellerangaben für tropische Zierfische.
+# Leitwert: kein belastbarer allgemeiner Richtwert gefunden, bewusst ohne Grenze.
 DEFAULT_LIMITS: dict[str, dict[str, float | None]] = {
     "ph": {"min": 6.5, "max": 7.5},
     "kh": {"min": 5, "max": 10},
@@ -82,6 +87,14 @@ DEFAULT_LIMITS: dict[str, dict[str, float | None]] = {
     "no2": {"min": None, "max": 0.5},
     "no3": {"min": None, "max": 50},
     "cl": {"min": None, "max": 0},
+    "nh4": {"min": None, "max": 0.25},
+    "po4": {"min": None, "max": 1.0},
+    "fe": {"min": None, "max": 0.5},
+    "cu": {"min": None, "max": 0.03},
+    "co2": {"min": None, "max": 25},
+    "o2": {"min": 5, "max": None},
+    "temperature": {"min": 24, "max": 26},
+    "conductivity": {"min": None, "max": None},
 }
 
 DEFAULT_ALERT_COUNT = 2

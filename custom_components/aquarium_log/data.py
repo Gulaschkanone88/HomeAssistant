@@ -52,12 +52,18 @@ class AquariumLog:
         data = await self._store.async_load() or {}
         self.items = data.get("items", [])
         self.notes = data.get("notes", [])
+        stored = data.get("settings", {})
         self.settings = {
-            "limits": {key: dict(value) for key, value in DEFAULT_LIMITS.items()},
             "alert_count": DEFAULT_ALERT_COUNT,
             "persistent_notification": True,
             "notify_services": [],
-            **data.get("settings", {}),
+            **stored,
+            # Gespeicherte Grenzen haben Vorrang; Werte ohne gespeicherte Grenze bekommen die
+            # Vorgabe, auch wenn sie erst mit einem Update dazugekommen ist.
+            "limits": {
+                **{key: dict(value) for key, value in DEFAULT_LIMITS.items()},
+                **stored.get("limits", {}),
+            },
         }
         self.active_alerts = data.get("active_alerts", [])
         self._sort()
