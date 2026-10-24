@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import io
+import re
 from typing import Any
 
 from aiohttp import web
@@ -343,6 +344,103 @@ class NotesTool(_AquariumTool):
         return {"notes": log.notes_for(args.get("parameter"), include_done=not args.get("open_only"))}
 
 
+def _parse_measurement_time(value: str | None) -> datetime | None:
+    """Zeitpunkt einer Messung: Datum mit Uhrzeit, ohne Zeitzone = Zeitzone von Home Assistant."""
+    if not value:
+        return None
+    # Ein reines Datum würde sonst still als Mitternacht übernommen.
+    parsed = dt_util.parse_datetime(value) if re.search(r"\d[T ]\d{1,2}:\d{2}", value) else None
+    if parsed is None:
+        raise ValueError(
+            f"timestamp: '{value}' ist kein Zeitpunkt mit Datum und Uhrzeit, z. B. 2026-10-24T18:30"
+        )
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt_util.get_default_time_zone())
+    parsed = dt_util.as_utc(parsed)
+    if parsed > dt_util.utcnow() + timedelta(minutes=5):
+        raise ValueError("timestamp liegt in der Zukunft")
+    return parsed
+
+
+class AddMeasurementTool(_AquariumTool):
+    name = "aquarium_add_measurement"
+    description = (
+        "Trägt einen Wassertest ins Aquarium-Tagebuch ein: Zeitpunkt der Messung und die gemessenen Werte "
+        "(nur die tatsächlich gemessenen angeben). Werte in der Einheit des Testkoffers, siehe Beschreibung "
+        "der Felder. Vor dem Eintragen die Werte mit dem Nutzer abgleichen, wenn sie unklar sind. "
+        "Antwort enthält den gespeicherten Eintrag und welche Werte außerhalb der Grenzen liegen."
+    )
+    parameters = vol.Schema(
+        {
+            _AQUARIUM: str,
+            vol.Optional(
+                "timestamp",
+                description=(
+                    "Datum und Uhrzeit der Messung, ISO 8601 (z. B. 2026-10-24T18:30). Ohne Zeitzone gilt die "
+                    "Zeitzone von Home Assistant. Weglassen = jetzt."
+                ),
+            ): str,
+            **{
+                vol.Optional(
+                    p.key,
+                    description=f"{p.name}{f' in {p.unit}' if p.unit else ''}, 0 bis {p.maximum:g}",
+                ): vol.All(vol.Coerce(float), vol.Range(min=0, max=p.maximum))
+                for p in PARAMETERS
+            },
+            vol.Optional("note", description="Notiz zur Messung"): str,
+        }
+    )
+
+    async def async_run(self, log, keys, args):
+        values: dict[str, float] = {}
+        for param in PARAMETERS:
+            if args.get(param.key) is None:
+                continue
+            try:
+                value = float(args[param.key])
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"{param.key}: keine Zahl") from err
+            if not 0 <= value <= param.maximum:
+                raise ValueError(f"{param.key}: {value:g} liegt außerhalb 0 bis {param.maximum:g}")
+            values[param.key] = value
+        if not values:
+            raise ValueError("Mindestens ein Wasserwert muss angegeben werden")
+        when = _parse_measurement_time(args.get("timestamp"))
+
+        # Schutz vor doppeltem Eintrag, z. B. wenn ein Aufruf wiederholt wird.
+        target = when or dt_util.utcnow()
+        for item in log.items:
+            if (
+                item["kind"] == "measurement"
+                and item["values"] == values
+                and abs((dt_util.parse_datetime(item["timestamp"]) - target).total_seconds()) < 120
+            ):
+                raise ValueError(f"Diese Messung ist bereits eingetragen (id {item['id']})")
+
+        note = (args.get("note") or "").strip()
+        if len(note) > NOTE_TEXT_MAX:
+            raise ValueError(f"note: höchstens {NOTE_TEXT_MAX} Zeichen")
+        item = await log.async_add_measurement(when, values, note)
+        out_of_range = {}
+        for key, value in values.items():
+            low, high = log.limit(key)
+            if (low is not None and value < low) or (high is not None and value > high):
+                out_of_range[key] = {"value": value, "min": low, "max": high}
+        disabled = [key for key in values if key not in keys]
+        result = {
+            "saved": True,
+            "measurement": item,
+            "out_of_range": out_of_range,
+            "active_warnings": list(log.violations(keys).values()),
+        }
+        if disabled:
+            result["hint"] = (
+                "Gespeichert, aber diese Werte sind in der Integration nicht aktiviert und erscheinen "
+                f"erst nach Zuschalten in den Optionen: {', '.join(disabled)}"
+            )
+        return result
+
+
 class AddNoteTool(_AquariumTool):
     name = "aquarium_add_note"
     description = (
@@ -376,7 +474,8 @@ API_PROMPT = (
     "Farbskala; kleine Schwankungen sind Messungenauigkeit, keine Entwicklung. Alle Zeitpunkte sind UTC. "
     "Beginne Auswertungen mit aquarium_summary und nutze aquarium_analyze für einzelne Werte. "
     "Ergebnisse, die der Nutzer im Dashboard sehen soll, mit aquarium_add_note speichern; vorher mit "
-    "aquarium_notes prüfen, ob dieselbe Empfehlung schon offen ist."
+    "aquarium_notes prüfen, ob dieselbe Empfehlung schon offen ist. Neue Wassertests mit "
+    "aquarium_add_measurement eintragen; Ändern und Löschen ist nur in Home Assistant selbst möglich."
 )
 
 
@@ -396,6 +495,7 @@ class AquariumLLMAPI(llm.API):
                 AnalyzeTool(),
                 NotesTool(),
                 AddNoteTool(),
+                AddMeasurementTool(),
             ],
         )
 

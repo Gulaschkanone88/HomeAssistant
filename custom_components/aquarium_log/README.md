@@ -89,6 +89,7 @@ weiter. Verfügbare Werkzeuge:
 | `aquarium_analyze` | Ein Wert im Detail: Wirkung jedes Wasserwechsels (vorher/nachher), Veränderung pro Tag zwischen den Wechseln, Prognose bis zur Grenze, Messreihe, Hinweise zu diesem Wert |
 | `aquarium_notes` | Gespeicherte Hinweise und Empfehlungen, optional nur offene oder nur zu einem Wert |
 | `aquarium_add_note` | Speichert das Ergebnis einer Auswertung als Empfehlung, Hinweis, Information oder Warnung |
+| `aquarium_add_measurement` | Trägt einen Wassertest mit Datum, Uhrzeit und Werten ein |
 
 Einrichtung:
 
@@ -110,8 +111,16 @@ als erledigt markiert und verschwindet aus dem Verlauf, bleibt aber im Tagebuch.
 Hinweise liefert `aquarium_summary` bei der nächsten Auswertung mit, damit der Assistent
 an frühere Empfehlungen anknüpft.
 
-Das ist der einzige schreibende Zugriff dieser API. Messungen, Ereignisse und Grenzwerte
-kann der Assistent darüber nicht ändern.
+Neue Wassertests trägt der Assistent mit `aquarium_add_measurement` ein, etwa wenn du ihm
+„heute 18:30: pH 7,2, KH 6, Nitrat 25“ diktierst. Ein Zeitpunkt muss Datum und Uhrzeit
+enthalten; ohne Zeitzone gilt die von Home Assistant, ohne Zeitpunkt gilt jetzt. Zeitpunkte in
+der Zukunft, Werte außerhalb des Messbereichs und ein doppelter Eintrag derselben Messung
+werden abgelehnt. Die Antwort nennt Werte außerhalb der Grenzen, sodass der Assistent direkt
+darauf hinweisen kann. Die Messung löst Statistik und Warnungen genauso aus wie ein Eintrag
+in der Karte.
+
+Mehr Schreibzugriff hat der Assistent nicht: Ändern und Löschen von Einträgen, Ereignisse
+und Grenzwerte bleiben der Karte bzw. den Diensten in Home Assistant vorbehalten.
 
 Danach lassen sich Fragen stellen wie „Wie schnell steigt mein Nitrat zwischen den
 Wasserwechseln?“ oder „Reicht mein Wechselintervall, um unter 50 mg/l zu bleiben?“.
