@@ -45,10 +45,13 @@ class AquariumLog:
         self.settings: dict[str, Any] = {}
         # Parameter, für die bereits eine Meldung verschickt wurde; überdauert Neustarts.
         self.active_alerts: list[str] = []
+        # Hinweise und Empfehlungen zu Auswertungen, z. B. von einem KI-Assistenten.
+        self.notes: list[dict[str, Any]] = []
 
     async def async_load(self) -> None:
         data = await self._store.async_load() or {}
         self.items = data.get("items", [])
+        self.notes = data.get("notes", [])
         self.settings = {
             "limits": {key: dict(value) for key, value in DEFAULT_LIMITS.items()},
             "alert_count": DEFAULT_ALERT_COUNT,
@@ -63,6 +66,7 @@ class AquariumLog:
         await self._store.async_save(
             {
                 "items": self.items,
+                "notes": self.notes,
                 "settings": self.settings,
                 "active_alerts": self.active_alerts,
             }
@@ -166,6 +170,63 @@ class AquariumLog:
     async def async_delete_item(self, item_id: str) -> None:
         self.items.remove(self.get_item(item_id))
         await self._async_commit()
+
+    async def async_add_note(
+        self,
+        category: str,
+        title: str,
+        text: str,
+        parameters: list[str],
+        author: str | None,
+        period_days: int | None = None,
+    ) -> dict[str, Any]:
+        for key in parameters:
+            if key not in PARAMETERS_BY_KEY:
+                raise ValueError(f"Unbekannter Wasserwert: {key}")
+        note = {
+            "id": uuid.uuid4().hex,
+            "timestamp": dt_util.utcnow().isoformat(),
+            "category": category,
+            "title": title.strip(),
+            "text": text.strip(),
+            "parameters": list(dict.fromkeys(parameters)),
+            "author": (author or "").strip(),
+            "period_days": period_days,
+            "done": False,
+        }
+        self.notes.append(note)
+        await self._async_commit()
+        return note
+
+    def get_note(self, note_id: str) -> dict[str, Any]:
+        for note in self.notes:
+            if note["id"] == note_id:
+                return note
+        raise KeyError(f"Hinweis {note_id} nicht gefunden")
+
+    async def async_update_note(self, note_id: str, changes: dict[str, Any]) -> dict[str, Any]:
+        note = self.get_note(note_id)
+        for key in ("done", "title", "text", "category"):
+            if key in changes:
+                note[key] = changes[key]
+        await self._async_commit()
+        return note
+
+    async def async_delete_note(self, note_id: str) -> None:
+        self.notes.remove(self.get_note(note_id))
+        await self._async_commit()
+
+    @callback
+    def notes_for(
+        self, parameter: str | None = None, include_done: bool = True, limit: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Hinweise, neueste zuerst; mit parameter nur die zu diesem Wert."""
+        result = [
+            note for note in reversed(self.notes)
+            if (include_done or not note["done"])
+            and (parameter is None or parameter in note["parameters"])
+        ]
+        return result[:limit] if limit else result
 
     def get_item(self, item_id: str) -> dict[str, Any]:
         for item in self.items:

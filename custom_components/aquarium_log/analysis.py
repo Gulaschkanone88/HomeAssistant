@@ -169,6 +169,7 @@ def summary(log: AquariumLog, keys: list[str], days: int | None) -> dict[str, An
         "measurements_in_period": len(measurements(log, keys, start, end)),
         "active_warnings": list(log.violations(keys).values()),
         "alert_count": log.settings["alert_count"],
+        "open_notes": log.notes_for(include_done=False, limit=10),
     }
 
 
@@ -237,5 +238,6 @@ def analyze(log: AquariumLog, key: str, days: int | None) -> dict[str, Any]:
             "average_per_day": _round(avg_rate),
         },
         "forecast": forecast,
+        "notes": log.notes_for(key, limit=10),
         "series": [{"timestamp": when.isoformat(), "value": value} for when, value in _series(log, key, start, end)],
     }

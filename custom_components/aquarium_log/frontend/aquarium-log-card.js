@@ -16,6 +16,13 @@ const EVENT_COLORS = {
   other: "#9e9e9e",
 };
 
+const NOTE_COLORS = {
+  recommendation: "#8e24aa",
+  hint: "#fb8c00",
+  info: "#546e7a",
+  warning: "#e53935",
+};
+
 const RANGES = [
   { days: 30, label: "30 Tage" },
   { days: 90, label: "90 Tage" },
@@ -265,8 +272,13 @@ class AquariumLogCard extends HTMLElement {
     const measurements = items.filter((i) => i.kind === "measurement");
     const events = items.filter((i) => i.kind === "event");
 
+    const general = this._openNotes().filter((n) => !n.parameters?.length);
+    const generalBlock = general.length
+      ? `<div class="notes"><div class="subhead">Hinweise &amp; Empfehlungen</div>${general.map((n) => this._noteHtml(n)).join("")}</div>`
+      : "";
+
     if (!measurements.length && !events.length) {
-      return `<div class="segments">${ranges}</div><div class="empty">Keine Einträge im gewählten Zeitraum.</div>`;
+      return `<div class="segments">${ranges}</div>${generalBlock}<div class="empty">Keine Einträge im gewählten Zeitraum.</div>`;
     }
 
     const times = items.map((i) => Date.parse(i.timestamp));
@@ -279,8 +291,10 @@ class AquariumLogCard extends HTMLElement {
         const points = measurements
           .filter((m) => m.values[p.key] !== undefined)
           .map((m) => ({ t: Date.parse(m.timestamp), v: m.values[p.key] }));
-        if (!points.length) return "";
-        return this._chart(p, points, events, t0, t0 + span);
+        const notes = this._openNotes().filter((n) => n.parameters?.includes(p.key)).slice(0, 3);
+        const noteBlock = notes.length ? `<div class="notes">${notes.map((n) => this._noteHtml(n)).join("")}</div>` : "";
+        if (!points.length) return noteBlock;
+        return this._chart(p, points, events, t0, t0 + span) + noteBlock;
       })
       .join("");
 
@@ -294,6 +308,7 @@ class AquariumLogCard extends HTMLElement {
 
     return `
       <div class="segments">${ranges}</div>
+      ${generalBlock}
       ${legend ? `<div class="legends">${legend}</div>` : ""}
       ${charts || `<div class="empty">Keine Messungen im gewählten Zeitraum.</div>`}`;
   }
@@ -380,12 +395,46 @@ class AquariumLogCard extends HTMLElement {
       </div>`;
   }
 
+  _openNotes() {
+    return [...(this._data.notes ?? [])].filter((n) => !n.done).reverse();
+  }
+
+  _noteHtml(note, withDate = true) {
+    const color = NOTE_COLORS[note.category] ?? "#757575";
+    const label = this._data.note_categories?.[note.category] ?? note.category;
+    const names = Object.fromEntries(this._data.parameters.map((p) => [p.key, p.name.replace(/\s*\(.*\)/, "")]));
+    const chips = (note.parameters ?? [])
+      .map((k) => `<span class="chip">${esc(names[k] ?? k.toUpperCase())}</span>`)
+      .join("");
+    const meta = [
+      withDate ? formatDate(note.timestamp) : "",
+      note.author ? `von ${note.author}` : "",
+      note.period_days ? `Zeitraum ${note.period_days} Tage` : "",
+    ].filter(Boolean).join(" · ");
+    return `
+      <div class="note-card ${note.done ? "done" : ""}" style="border-left-color:${color}">
+        <div class="row-head">
+          <span class="badge" style="background:${color}">${esc(label)}</span>
+          <b class="note-title">${esc(note.title)}</b>
+          <span class="spacer"></span>
+          <button class="icon" data-note-done="${note.id}" title="${note.done ? "Wieder öffnen" : "Erledigt"}">${note.done ? "↺" : "✓"}</button>
+          <button class="icon" data-note-delete="${note.id}" title="Löschen">✕</button>
+        </div>
+        <div class="note-text">${esc(note.text)}</div>
+        <div class="note-meta">${chips}<span>${esc(meta)}</span></div>
+      </div>`;
+  }
+
   _renderJournal() {
-    const items = [...this._data.items].reverse();
+    const items = [
+      ...this._data.items,
+      ...(this._data.notes ?? []).map((n) => ({ ...n, kind: "note" })),
+    ].sort((a, b) => (a.timestamp < b.timestamp ? 1 : -1));
     if (!items.length) return `<div class="empty">Noch keine Einträge.</div>`;
     const params = Object.fromEntries(this._data.parameters.map((p) => [p.key, p]));
     return `<div class="journal">${items
       .map((item) => {
+        if (item.kind === "note") return `<div class="row">${this._noteHtml(item)}</div>`;
         let head, detail;
         if (item.kind === "measurement") {
           head = `<span class="badge measure">Wassertest</span>`;
@@ -595,6 +644,20 @@ class AquariumLogCard extends HTMLElement {
     root.querySelectorAll("[data-delete]").forEach((el) =>
       el.addEventListener("click", () => this._delete(el.dataset.delete))
     );
+    root.querySelectorAll("[data-note-done]").forEach((el) =>
+      el.addEventListener("click", () => {
+        const note = this._data.notes.find((n) => n.id === el.dataset.noteDone);
+        if (note) this._call("update_note", { note_id: note.id, done: !note.done }).catch((err) => alert(err.message || err));
+      })
+    );
+    root.querySelectorAll("[data-note-delete]").forEach((el) =>
+      el.addEventListener("click", () => {
+        const note = this._data.notes.find((n) => n.id === el.dataset.noteDelete);
+        if (note && confirm(`Hinweis „${note.title}“ endgültig löschen?`)) {
+          this._call("delete_note", { note_id: note.id }).catch((err) => alert(err.message || err));
+        }
+      })
+    );
     root.querySelectorAll("[data-edit]").forEach((el) =>
       el.addEventListener("click", () => this._edit(el.dataset.edit))
     );
@@ -755,6 +818,15 @@ const STYLE = `
   .when { font-size: .9em; color: var(--secondary-text-color); }
   .icon { background: none; border: none; cursor: pointer; color: var(--secondary-text-color); font-size: 1.05em; padding: 4px 6px; }
   .vals { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 6px; font-size: .95em; }
+  .notes { margin: 4px 0 16px; }
+  .note-card { border-left: 4px solid; border-radius: 6px; padding: 8px 10px; margin: 6px 0;
+               background: var(--secondary-background-color, rgba(0,0,0,.04)); }
+  .note-card.done { opacity: .55; }
+  .note-title { font-size: .95em; }
+  .note-text { margin-top: 6px; font-size: .92em; white-space: pre-wrap; line-height: 1.45; }
+  .note-meta { margin-top: 6px; font-size: .78em; color: var(--secondary-text-color); display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .chip { border: 1px solid var(--divider-color); border-radius: 10px; padding: 0 7px; }
+  .journal .row .note-card { margin: 0; }
   .hint { font-size: .8em; color: var(--secondary-text-color); }
   input.bad, .val.bad b, .latest.bad { color: var(--error-color, #db4437); }
   input.bad { border-color: var(--error-color, #db4437); }

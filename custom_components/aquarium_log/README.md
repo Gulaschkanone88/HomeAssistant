@@ -86,7 +86,9 @@ weiter. Verfügbare Werkzeuge:
 | `aquarium_summary` | Je Wert: letzter Stand, Grenzen, Status, Mittel/Min/Max, Trend pro Woche, Anteil außerhalb der Grenzen; Wasserwechsel-Statistik; aktive Warnungen |
 | `aquarium_measurements` | Rohdaten der Wassertests, filterbar nach Wert und Zeitraum |
 | `aquarium_events` | Pflegeereignisse, filterbar nach Art und Zeitraum |
-| `aquarium_analyze` | Ein Wert im Detail: Wirkung jedes Wasserwechsels (vorher/nachher), Veränderung pro Tag zwischen den Wechseln, Prognose bis zur Grenze, Messreihe |
+| `aquarium_analyze` | Ein Wert im Detail: Wirkung jedes Wasserwechsels (vorher/nachher), Veränderung pro Tag zwischen den Wechseln, Prognose bis zur Grenze, Messreihe, Hinweise zu diesem Wert |
+| `aquarium_notes` | Gespeicherte Hinweise und Empfehlungen, optional nur offene oder nur zu einem Wert |
+| `aquarium_add_note` | Speichert das Ergebnis einer Auswertung als Empfehlung, Hinweis, Information oder Warnung |
 
 Einrichtung:
 
@@ -100,6 +102,16 @@ Einrichtung:
    claude mcp add --transport http aquarium https://<deine-ha-adresse>/api/mcp \
      --header "Authorization: Bearer <token>"
    ```
+
+Ergebnisse, die im Dashboard stehen sollen, speichert der Assistent mit `aquarium_add_note`.
+Ein solcher Hinweis erscheint in der Karte unter dem Diagramm des betroffenen Werts (oder
+oben im Verlauf, wenn er keinen bestimmten Wert betrifft) und im Tagebuch. Über ✓ wird er
+als erledigt markiert und verschwindet aus dem Verlauf, bleibt aber im Tagebuch. Offene
+Hinweise liefert `aquarium_summary` bei der nächsten Auswertung mit, damit der Assistent
+an frühere Empfehlungen anknüpft.
+
+Das ist der einzige schreibende Zugriff dieser API. Messungen, Ereignisse und Grenzwerte
+kann der Assistent darüber nicht ändern.
 
 Danach lassen sich Fragen stellen wie „Wie schnell steigt mein Nitrat zwischen den
 Wasserwechseln?“ oder „Reicht mein Wechselintervall, um unter 50 mg/l zu bleiben?“.
@@ -119,6 +131,8 @@ wählt `aquarium=<Name>` das Becken.
 | `GET /api/aquarium_log/measurements?start=2026-01-01&end=2026-06-30&parameter=no3` | Messungen; `format=csv` liefert CSV |
 | `GET /api/aquarium_log/events?event_type=water_change` | Ereignisse |
 | `GET /api/aquarium_log/analysis/no3?days=180` | Auswertung wie `aquarium_analyze` |
+| `GET /api/aquarium_log/notes?parameter=no3&open=1` | Hinweise, `open=1` = nur offene |
+| `POST /api/aquarium_log/notes` | Hinweis anlegen, JSON wie Dienst `add_note` |
 
 Beispiel:
 
@@ -179,6 +193,7 @@ Skripten oder per REST-API nutzen.
 | `aquarium_log.update_item` | Eintrag ändern |
 | `aquarium_log.delete_item` | Eintrag löschen |
 | `aquarium_log.configure` | Grenzwerte, Anzahl Messungen bis zur Meldung, Meldekanäle |
+| `aquarium_log.add_note` / `update_note` / `delete_note` | Hinweise und Empfehlungen anlegen, als erledigt markieren, löschen |
 | `aquarium_log.export` | Alle Einträge als Liste und CSV (Semikolon-getrennt) zurückgeben |
 
 Beispiel, alte Notizbuchwerte nachtragen:

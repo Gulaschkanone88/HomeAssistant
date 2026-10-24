@@ -46,6 +46,9 @@ from .const import (
     DOMAIN,
     EVENT_TYPES,
     FRONTEND_URL,
+    NOTE_CATEGORIES,
+    NOTE_TEXT_MAX,
+    NOTE_TITLE_MAX,
     PARAMETERS,
     PARAMETERS_BY_KEY,
     SIGNAL_UPDATED,
@@ -100,6 +103,35 @@ DELETE_ITEM_SCHEMA = vol.Schema(
 EXPORT_SCHEMA = vol.Schema({vol.Optional(ATTR_ENTRY_ID): cv.string})
 
 _OPTIONAL_NUMBER = vol.Any(None, vol.Coerce(float))
+
+ADD_NOTE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required("category", default="recommendation"): vol.In(list(NOTE_CATEGORIES)),
+        vol.Required("title"): vol.All(cv.string, vol.Length(min=1, max=NOTE_TITLE_MAX)),
+        vol.Required("text"): vol.All(cv.string, vol.Length(min=1, max=NOTE_TEXT_MAX)),
+        vol.Optional("parameters", default=[]): vol.All(
+            cv.ensure_list, [vol.In(list(PARAMETERS_BY_KEY))]
+        ),
+        vol.Optional("author"): vol.All(cv.string, vol.Length(max=60)),
+        vol.Optional("period_days"): vol.All(vol.Coerce(int), vol.Range(min=0)),
+    }
+)
+
+UPDATE_NOTE_SCHEMA = vol.Schema(
+    {
+        vol.Optional(ATTR_ENTRY_ID): cv.string,
+        vol.Required("note_id"): cv.string,
+        vol.Optional("done"): cv.boolean,
+        vol.Optional("category"): vol.In(list(NOTE_CATEGORIES)),
+        vol.Optional("title"): vol.All(cv.string, vol.Length(min=1, max=NOTE_TITLE_MAX)),
+        vol.Optional("text"): vol.All(cv.string, vol.Length(min=1, max=NOTE_TEXT_MAX)),
+    }
+)
+
+DELETE_NOTE_SCHEMA = vol.Schema(
+    {vol.Optional(ATTR_ENTRY_ID): cv.string, vol.Required("note_id"): cv.string}
+)
 
 CONFIGURE_SCHEMA = vol.Schema(
     {
@@ -284,8 +316,8 @@ def _register_services(hass: HomeAssistant) -> None:
 
     async def export(call: ServiceCall) -> ServiceResponse:
         entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
-        items = entry.runtime_data.log.items
-        return {"items": items, "csv": _to_csv(items)}
+        log = entry.runtime_data.log
+        return {"items": log.items, "notes": log.notes, "csv": _to_csv(log.items)}
 
     async def configure(call: ServiceCall) -> None:
         entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
@@ -293,6 +325,37 @@ def _register_services(hass: HomeAssistant) -> None:
         try:
             await entry.runtime_data.log.async_update_settings(changes)
         except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+
+    async def add_note(call: ServiceCall) -> ServiceResponse:
+        entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
+        try:
+            note = await entry.runtime_data.log.async_add_note(
+                call.data["category"],
+                call.data["title"],
+                call.data["text"],
+                call.data["parameters"],
+                call.data.get("author"),
+                call.data.get("period_days"),
+            )
+        except ValueError as err:
+            raise ServiceValidationError(str(err)) from err
+        return {"note": note}
+
+    async def update_note(call: ServiceCall) -> ServiceResponse:
+        entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
+        changes = {k: v for k, v in call.data.items() if k not in (ATTR_ENTRY_ID, "note_id")}
+        try:
+            note = await entry.runtime_data.log.async_update_note(call.data["note_id"], changes)
+        except KeyError as err:
+            raise ServiceValidationError(str(err)) from err
+        return {"note": note}
+
+    async def delete_note(call: ServiceCall) -> None:
+        entry = _resolve_entry(hass, call.data.get(ATTR_ENTRY_ID))
+        try:
+            await entry.runtime_data.log.async_delete_note(call.data["note_id"])
+        except KeyError as err:
             raise ServiceValidationError(str(err)) from err
 
     optional = SupportsResponse.OPTIONAL
@@ -305,6 +368,11 @@ def _register_services(hass: HomeAssistant) -> None:
     )
     hass.services.async_register(DOMAIN, "delete_item", delete_item, DELETE_ITEM_SCHEMA)
     hass.services.async_register(DOMAIN, "configure", configure, CONFIGURE_SCHEMA)
+    hass.services.async_register(DOMAIN, "add_note", add_note, ADD_NOTE_SCHEMA, optional)
+    hass.services.async_register(
+        DOMAIN, "update_note", update_note, UPDATE_NOTE_SCHEMA, optional
+    )
+    hass.services.async_register(DOMAIN, "delete_note", delete_note, DELETE_NOTE_SCHEMA)
     hass.services.async_register(
         DOMAIN, "export", export, EXPORT_SCHEMA, SupportsResponse.ONLY
     )
@@ -351,6 +419,8 @@ def _payload(entry: AquariumConfigEntry) -> dict[str, Any]:
         "event_types": EVENT_TYPES,
         "items": log.items,
         "settings": log.settings,
+        "notes": log.notes,
+        "note_categories": NOTE_CATEGORIES,
         "violations": log.violations(enabled_parameters(entry)),
     }
 

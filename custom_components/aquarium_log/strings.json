@@ -46,6 +46,14 @@
         "technology": "Technik",
         "other": "Sonstiges"
       }
+    },
+    "note_category": {
+      "options": {
+        "recommendation": "Empfehlung",
+        "hint": "Hinweis",
+        "info": "Information",
+        "warning": "Warnung"
+      }
     }
   },
   "services": {
@@ -228,6 +236,84 @@
         "notify_services": {
           "name": "Push-Dienste",
           "description": "notify-Dienste für Push-Meldungen, z. B. notify.mobile_app_mein_handy."
+        }
+      }
+    },
+    "add_note": {
+      "name": "Hinweis speichern",
+      "description": "Speichert einen Hinweis, eine Information, Empfehlung oder Warnung zu einer Auswertung.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "category": {
+          "name": "Art",
+          "description": "Empfehlung, Hinweis, Information oder Warnung."
+        },
+        "title": {
+          "name": "Titel",
+          "description": "Kurzer Titel."
+        },
+        "text": {
+          "name": "Text",
+          "description": "Begründung und Empfehlung."
+        },
+        "parameters": {
+          "name": "Wasserwerte",
+          "description": "Betroffene Wasserwerte; der Hinweis erscheint bei deren Diagramm."
+        },
+        "author": {
+          "name": "Verfasser",
+          "description": "Wer den Hinweis geschrieben hat."
+        },
+        "period_days": {
+          "name": "Zeitraum",
+          "description": "Ausgewerteter Zeitraum in Tagen."
+        }
+      }
+    },
+    "update_note": {
+      "name": "Hinweis ändern",
+      "description": "Markiert einen Hinweis als erledigt oder ändert ihn.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "note_id": {
+          "name": "Hinweis-ID",
+          "description": "ID des Hinweises."
+        },
+        "done": {
+          "name": "Erledigt",
+          "description": "Hinweis als erledigt markieren."
+        },
+        "category": {
+          "name": "Art",
+          "description": "Empfehlung, Hinweis, Information oder Warnung."
+        },
+        "title": {
+          "name": "Titel",
+          "description": "Kurzer Titel."
+        },
+        "text": {
+          "name": "Text",
+          "description": "Begründung und Empfehlung."
+        }
+      }
+    },
+    "delete_note": {
+      "name": "Hinweis löschen",
+      "description": "Löscht einen Hinweis endgültig.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Aquarium",
+          "description": "Ohne Angabe wird das einzige eingerichtete Aquarium verwendet."
+        },
+        "note_id": {
+          "name": "Hinweis-ID",
+          "description": "ID des Hinweises."
         }
       }
     },

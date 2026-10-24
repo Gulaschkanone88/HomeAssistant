@@ -18,7 +18,15 @@ from homeassistant.util import dt as dt_util
 from homeassistant.util.json import JsonObjectType
 
 from . import analysis
-from .const import DOMAIN, EVENT_TYPES, PARAMETERS, PARAMETERS_BY_KEY
+from .const import (
+    DOMAIN,
+    EVENT_TYPES,
+    NOTE_CATEGORIES,
+    NOTE_TEXT_MAX,
+    NOTE_TITLE_MAX,
+    PARAMETERS,
+    PARAMETERS_BY_KEY,
+)
 
 LLM_API_ID = DOMAIN
 
@@ -156,9 +164,50 @@ class AnalysisView(_AquariumView):
         return self.json({"aquarium": entry.title, **analysis.analyze(log, parameter, days)})
 
 
+async def _async_add_note(log, data: dict[str, Any], default_author: str) -> dict[str, Any]:
+    """Validiert wie der Dienst add_note und speichert den Hinweis."""
+    from . import ADD_NOTE_SCHEMA
+
+    try:
+        clean = ADD_NOTE_SCHEMA({k: v for k, v in data.items() if k != "aquarium"})
+    except vol.Invalid as err:
+        raise ValueError(f"Ungültiger Hinweis: {err}") from err
+    return await log.async_add_note(
+        clean["category"],
+        clean["title"],
+        clean["text"],
+        clean["parameters"],
+        clean.get("author") or default_author,
+        clean.get("period_days"),
+    )
+
+
+class NotesView(_AquariumView):
+    """GET /api/aquarium_log/notes?parameter=no3&open=1, POST mit JSON zum Anlegen."""
+
+    url = f"/api/{DOMAIN}/notes"
+    name = f"api:{DOMAIN}:notes"
+
+    def respond(self, entry, log, keys, query, **kwargs):
+        notes = log.notes_for(query.get("parameter"), include_done=query.get("open") != "1")
+        return self.json({"aquarium": entry.title, "notes": notes})
+
+    async def post(self, request: web.Request) -> web.Response:
+        hass: HomeAssistant = request.app["hass"]
+        try:
+            body = await request.json()
+            if not isinstance(body, dict):
+                raise ValueError("JSON-Objekt erwartet")
+            entry = _find_entry(hass, body.get("aquarium") or request.query.get("aquarium"))
+            note = await _async_add_note(entry.runtime_data.log, body, "")
+        except (ValueError, ServiceValidationError, HomeAssistantError) as err:
+            return self.json_message(str(err), status_code=400)
+        return self.json({"aquarium": entry.title, "note": note}, status_code=201)
+
+
 @callback
 def async_register_views(hass: HomeAssistant) -> None:
-    for view in (SummaryView, MeasurementsView, EventsView, AnalysisView):
+    for view in (SummaryView, MeasurementsView, EventsView, AnalysisView, NotesView):
         hass.http.register_view(view())
 
 
@@ -177,9 +226,12 @@ class _AquariumTool(llm.Tool):
         try:
             entry = _find_entry(hass, args.get("aquarium"))
             log, keys = _context(entry)
-            return {"aquarium": entry.title, **self.run(log, keys, args)}
+            return {"aquarium": entry.title, **await self.async_run(log, keys, args)}
         except (ValueError, ServiceValidationError, HomeAssistantError) as err:
             return {"error": str(err)}
+
+    async def async_run(self, log, keys, args: dict[str, Any]) -> dict[str, Any]:
+        return self.run(log, keys, args)
 
     def run(self, log, keys, args: dict[str, Any]) -> dict[str, Any]:
         raise NotImplementedError
@@ -273,13 +325,58 @@ class AnalyzeTool(_AquariumTool):
         return analysis.analyze(log, args["parameter"], _parse_days(args.get("days")))
 
 
+class NotesTool(_AquariumTool):
+    name = "aquarium_notes"
+    description = (
+        "Bisher gespeicherte Hinweise und Empfehlungen zu Auswertungen, neueste zuerst. Vor einer neuen "
+        "Empfehlung prüfen, was schon empfohlen wurde und ob es als erledigt markiert ist."
+    )
+    parameters = vol.Schema(
+        {
+            _AQUARIUM: str,
+            vol.Optional("parameter", description="Nur Hinweise zu diesem Wasserwert"): vol.In(_PARAMETER_KEYS),
+            vol.Optional("open_only", description="Nur nicht erledigte Hinweise"): bool,
+        }
+    )
+
+    def run(self, log, keys, args):
+        return {"notes": log.notes_for(args.get("parameter"), include_done=not args.get("open_only"))}
+
+
+class AddNoteTool(_AquariumTool):
+    name = "aquarium_add_note"
+    description = (
+        "Speichert einen Hinweis, eine Information, Empfehlung oder Warnung zu einer Auswertung im "
+        "Aquarium-Tagebuch. Er erscheint in der Dashboard-Karte beim betroffenen Wasserwert und im "
+        "Tagebuch und wird bei künftigen Auswertungen mitgeliefert. Nur nach einer Auswertung mit "
+        "konkretem Datenbezug verwenden; Zahlen und Zeitraum im Text nennen."
+    )
+    parameters = vol.Schema(
+        {
+            _AQUARIUM: str,
+            vol.Required("category", description="Art des Eintrags"): vol.In(list(NOTE_CATEGORIES)),
+            vol.Required("title", description=f"Kurzer Titel, höchstens {NOTE_TITLE_MAX} Zeichen"): str,
+            vol.Required("text", description=f"Begründung und Empfehlung, höchstens {NOTE_TEXT_MAX} Zeichen"): str,
+            vol.Optional("parameters", description="Betroffene Wasserwerte"): [vol.In(_PARAMETER_KEYS)],
+            vol.Optional("period_days", description="Ausgewerteter Zeitraum in Tagen"): vol.All(int, vol.Range(min=0)),
+            vol.Optional("author", description="Name des Assistenten"): str,
+        }
+    )
+
+    async def async_run(self, log, keys, args):
+        note = await _async_add_note(log, args, "KI-Assistent")
+        return {"saved": True, "note": note}
+
+
 API_PROMPT = (
     "Das Aquarium-Tagebuch enthält manuell mit einem Tropftest-Koffer gemessene Wasserwerte und "
     "dokumentierte Pflegeereignisse. Schlüssel der Wasserwerte: "
     + ", ".join(f"{p.key} = {p.name}{f' [{p.unit}]' if p.unit else ''}" for p in PARAMETERS)
     + ". Die Grenzen (limit_min/limit_max) hat der Nutzer selbst festgelegt. Tropftests haben eine grobe "
     "Farbskala; kleine Schwankungen sind Messungenauigkeit, keine Entwicklung. Alle Zeitpunkte sind UTC. "
-    "Beginne Auswertungen mit aquarium_summary und nutze aquarium_analyze für einzelne Werte."
+    "Beginne Auswertungen mit aquarium_summary und nutze aquarium_analyze für einzelne Werte. "
+    "Ergebnisse, die der Nutzer im Dashboard sehen soll, mit aquarium_add_note speichern; vorher mit "
+    "aquarium_notes prüfen, ob dieselbe Empfehlung schon offen ist."
 )
 
 
@@ -292,7 +389,14 @@ class AquariumLLMAPI(llm.API):
             api=self,
             api_prompt=API_PROMPT,
             llm_context=llm_context,
-            tools=[SummaryTool(), MeasurementsTool(), EventsTool(), AnalyzeTool()],
+            tools=[
+                SummaryTool(),
+                MeasurementsTool(),
+                EventsTool(),
+                AnalyzeTool(),
+                NotesTool(),
+                AddNoteTool(),
+            ],
         )
 
 

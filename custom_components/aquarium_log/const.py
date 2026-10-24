@@ -88,3 +88,12 @@ DEFAULT_ALERT_COUNT = 2
 
 EVENT_LIMIT_EXCEEDED = f"{DOMAIN}_limit_exceeded"
 EVENT_LIMIT_CLEARED = f"{DOMAIN}_limit_cleared"
+
+NOTE_CATEGORIES: dict[str, str] = {
+    "recommendation": "Empfehlung",
+    "hint": "Hinweis",
+    "info": "Information",
+    "warning": "Warnung",
+}
+NOTE_TITLE_MAX = 120
+NOTE_TEXT_MAX = 4000

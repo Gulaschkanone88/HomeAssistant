@@ -262,6 +262,102 @@ configure:
         text:
           multiple: true
 
+add_note:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: aquarium_log
+    category:
+      required: true
+      default: recommendation
+      selector:
+        select:
+          translation_key: note_category
+          options:
+            - recommendation
+            - hint
+            - info
+            - warning
+    title:
+      required: true
+      selector:
+        text:
+    text:
+      required: true
+      selector:
+        text:
+          multiline: true
+    parameters:
+      selector:
+        select:
+          multiple: true
+          options:
+            - ph
+            - kh
+            - gh
+            - no2
+            - no3
+            - cl
+            - nh4
+            - po4
+            - fe
+            - cu
+            - co2
+            - o2
+            - temperature
+            - conductivity
+    author:
+      selector:
+        text:
+    period_days:
+      selector:
+        number:
+          min: 0
+          max: 3650
+          mode: box
+
+update_note:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: aquarium_log
+    note_id:
+      required: true
+      selector:
+        text:
+    done:
+      selector:
+        boolean:
+    category:
+      selector:
+        select:
+          translation_key: note_category
+          options:
+            - recommendation
+            - hint
+            - info
+            - warning
+    title:
+      selector:
+        text:
+    text:
+      selector:
+        text:
+          multiline: true
+
+delete_note:
+  fields:
+    config_entry_id:
+      selector:
+        config_entry:
+          integration: aquarium_log
+    note_id:
+      required: true
+      selector:
+        text:
+
 export:
   fields:
     config_entry_id:
