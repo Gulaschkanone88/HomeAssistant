@@ -1,0 +1,51 @@
+# Beispiel-Dashboard für das Aquarium-Tagebuch.
+# Einfügen über Dashboard bearbeiten → ⋮ → Raw-Konfigurationseditor, oder als Ansicht übernehmen.
+# Die IDs gelten für ein Becken mit dem Namen "Aquarium"; bei anderem Namen entsprechend anpassen.
+title: Aquarium
+views:
+  - title: Aquarium
+    path: aquarium
+    icon: mdi:fishbowl-outline
+    type: sections
+    sections:
+      - cards:
+          - type: custom:aquarium-log-card
+            default_tab: add
+      - cards:
+          - type: tile
+            entity: binary_sensor.aquarium_grenzwertwarnung
+          - type: tile
+            entity: sensor.aquarium_letzter_wasserwechsel
+          - type: statistics-graph
+            title: Nitrit und Nitrat
+            chart_type: line
+            period: day
+            days_to_show: 90
+            stat_types:
+              - mean
+            entities:
+              - aquarium_log:aquarium_no2
+              - aquarium_log:aquarium_no3
+          - type: statistics-graph
+            title: Härte
+            chart_type: line
+            period: day
+            days_to_show: 90
+            stat_types:
+              - mean
+            entities:
+              - aquarium_log:aquarium_kh
+              - aquarium_log:aquarium_gh
+          - type: statistics-graph
+            title: pH-Wert
+            chart_type: line
+            period: day
+            days_to_show: 90
+            stat_types:
+              - mean
+            entities:
+              - aquarium_log:aquarium_ph
+          - type: calendar
+            initial_view: listWeek
+            entities:
+              - calendar.aquarium_tagebuch
